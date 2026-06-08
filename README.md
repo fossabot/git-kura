@@ -138,7 +138,7 @@ For structured output, use JSON:
 git kura get 51 --json
 ```
 
-For AI prompts, `kura` provide TOON:
+For AI prompts, `kura` provide [TOON](https://github.com/toon-format/toon):
 
 ```sh
 git kura get 51 --toon
