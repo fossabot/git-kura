@@ -44,10 +44,10 @@ The same key should always resolve to the same workspace.
 
 ## Example
 
-Start work on issue `51`:
+Open worktree on issue `51`:
 
 ```sh
-git kura start 51
+git kura open 51
 ```
 
 Resolve the worktree path for issue `51`:
@@ -76,7 +76,7 @@ git kura end 51
 
 ## Commands
 
-### `git kura start <key>`
+### `git kura open <key>`
 
 Create the branch and worktree for the given key.
 
@@ -104,7 +104,7 @@ For example:
 codex review "$(git kura get 51 --path)"
 ```
 
-### `git kura end <key>`
+### `git kura close <key>`
 
 Remove the worktree associated with the given key.
 
