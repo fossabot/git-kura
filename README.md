@@ -6,9 +6,9 @@ It maps issue, ticket, or task keys to deterministic Git worktrees for humans, A
 
 ```sh
 git kura start 51             # create a worktree for Issue #51
+git kura get 51               # print workspace metadata for Issue #51
 git kura get 51 --path        # print the worktree path for Issue #51
 git kura get 51 --branch      # print the branch name for Issue #51
-git kura get 51               # print workspace metadata for Issue #51
 git kura get 51 --format json # print workspace metadata as JSON
 git kura get 51 --json        # alias of `--format json`
 git kura get 51 --format toon # print workspace metadata as TOON for AI prompts
