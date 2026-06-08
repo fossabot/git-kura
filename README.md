@@ -68,10 +68,10 @@ Get machine-readable metadata:
 git kura get 51 --json
 ```
 
-End work on issue `51`:
+close work on issue `51`:
 
 ```sh
-git kura end 51
+git kura close 51
 ```
 
 ## Commands
@@ -81,7 +81,7 @@ git kura end 51
 Create the branch and worktree for the given key.
 
 ```sh
-git kura start 51
+git kura open 51
 ```
 
 If the corresponding branch or worktree already exists, Kura should not create a conflicting workspace.
@@ -109,7 +109,7 @@ codex review "$(git kura get 51 --path)"
 Remove the worktree associated with the given key.
 
 ```sh
-git kura end 51
+git kura close 51
 ```
 
 Kura should refuse to remove a worktree when doing so would discard uncommitted changes unless explicitly instructed.

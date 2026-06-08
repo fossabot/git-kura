@@ -28,12 +28,12 @@ Kura will be implemented in Go.
 The distributed executable will be a single binary named `git-kura`, intended to be invoked as a Git subcommand:
 
 ```sh
-git kura start 51
+git kura open 51
 git kura get 51 --path
 git kura get 51 --branch
 git kura get 51 --json
 git kura get 51 --toon
-git kura end 51
+git kura close 51
 ```
 
 Kura will use the Git command-line executable for Git operations. It will not depend on `libgit2`, GitHub CLI, GitLab CLI, Node.js, Python, or any other runtime command.
@@ -172,14 +172,14 @@ type WorkspaceMetadata struct {
 
 ## CLI Parsing
 
-Kura will start with a small hand-written CLI parser or Go standard-library based command dispatch.
+Kura will open with a small hand-written CLI parser or Go standard-library based command dispatch.
 
 External CLI frameworks such as Cobra or urfave/cli are not required for v0.
 
 This is intentional. Kura has a narrow command surface:
 
 ```txt
-start <key>
+open <key>
 get <key>
 end <key>
 ```
@@ -274,7 +274,7 @@ This is not intended as a heavy architecture. The purpose is only to prevent CLI
 
 Kura must be conservative around destructive operations.
 
-In particular, `git kura end <key>` must not silently discard work.
+In particular, `git kura close <key>` must not silently discard work.
 
 Before removing a worktree, Kura should check conditions such as:
 
