@@ -104,6 +104,8 @@ For example:
 codex review "$(git kura get 51 --path)"
 ```
 
+See [docs/output-format.md](docs/output-format.md) for the full metadata schema and output format reference.
+
 ### `git kura close <key>`
 
 Remove the worktree associated with the given key.
@@ -113,6 +115,44 @@ git kura close 51
 ```
 
 Kura should refuse to remove a worktree when doing so would discard uncommitted changes unless explicitly instructed.
+
+## Keys
+
+A key is an opaque, case-sensitive string identifier.
+
+Kura does not parse keys as numbers.
+Kura does not resolve keys through GitHub, GitLab, or any issue tracker.
+
+In v0, a key must match:
+
+```
+[A-Za-z0-9][A-Za-z0-9._-]{0,127}
+```
+
+Additionally, Kura rejects keys that:
+
+- are `"."` or `".."`
+- contain `".."`
+- start with `"."`
+- end with `"."`
+- end with `".lock"`
+- contain path separators `"/"` or `"\"`
+- contain whitespace
+- contain control characters
+- contain shell metacharacters
+- contain Git ref expression syntax such as `"@{"`
+
+## Exit codes
+
+Kura uses stable exit codes so scripts and AI-agent workflows can react correctly.
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Usage error |
+| 3 | Unsafe operation refused |
+| 4 | Not found |
 
 ## Design principles
 
@@ -179,12 +219,29 @@ Kura only manages the mapping between a key and a Git worktree.
 
 ## Installation
 
-Installation instructions will depend on the distribution method.
+### Build from source
 
-For example:
+Requirements: Go toolchain, Git
 
 ```sh
-# TODO
+make build
+```
+
+This produces `./bin/git-kura`. Place it somewhere on `PATH` so Git can find it as a subcommand:
+
+```sh
+cp ./bin/git-kura /usr/local/bin/git-kura
+```
+
+## Platform support
+
+Kura supports macOS, Linux, and Windows.
+
+Path handling uses platform-aware APIs. Git branch names and filesystem paths are treated as distinct:
+
+```
+branch: issue/51
+path:   <repo>-issue-51  (platform path separator)
 ```
 
 ## Status
