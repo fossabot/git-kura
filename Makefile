@@ -28,7 +28,7 @@ tidy:
 
 .PHONY: build
 build:
-	go build -o ./bin/kogoto ./cmd/kogoto
+	go build -o ./bin/git-kura ./cmd/kura
 
 .PHONY: check
 check: fmt-check vet test vuln
