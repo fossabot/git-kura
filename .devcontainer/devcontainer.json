@@ -3,8 +3,15 @@
   "image": "mcr.microsoft.com/devcontainers/go:1.26-trixie",
   "workspaceFolder": "/workspaces/git-kura",
   "remoteUser": "vscode",
-  "runArgs": ["--init"],
-  "postCreateCommand": "bash -lc 'git config --global --add safe.directory /workspaces/git-kura && if [ -f go.mod ]; then go mod download; fi && git --version && go version'",
+  "runArgs": [
+    "--init"
+  ],
+  "postCreateCommand": {
+    "setup-git": [
+      "sh",
+      "scripts/dev/setup-git-config.sh"
+    ]
+  },
   "customizations": {
     "vscode": {
       "extensions": [
