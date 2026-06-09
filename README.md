@@ -97,6 +97,7 @@ cp ./bin/git-kura /usr/local/bin/git-kura
 
 * [Commands](docs/commands.md)
 * [Output formats](docs/output-format.md)
+* [State management](docs/state-management.md)
 * [Design](docs/design.md)
 * [Architecture decision records](docs/adr/)
 

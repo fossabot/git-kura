@@ -73,6 +73,8 @@ Kura does not aim to:
 
 Kura only manages the mapping between a key and a Git worktree.
 
+See [state-management.md](state-management.md) for how Kura stores local worktrees and metadata.
+
 ## Platform support
 
 Kura supports macOS, Linux, and Windows.
