@@ -1,0 +1,42 @@
+name: snapshot
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run GoReleaser check
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version-file: .tool-versions
+          args: check
+
+      - name: Build snapshot artifacts
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version-file: .tool-versions
+          args: release --snapshot --clean
+
+      - name: Upload snapshot artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: git-kura-snapshot-artifacts
+          path: dist/*

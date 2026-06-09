@@ -1,0 +1,44 @@
+version: 2
+
+project_name: git-kura
+
+builds:
+  - id: git-kura
+    main: ./cmd/kura
+    binary: git-kura
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: release-archives
+    ids:
+      - git-kura
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: 'git-kura_{{ title .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}'
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+  ids:
+    - release-archives
+
+snapshot:
+  version_template: '{{ .Tag }}-snapshot'
+
+changelog:
+  disable: false
