@@ -40,3 +40,125 @@ jobs:
         with:
           name: git-kura-snapshot-artifacts
           path: dist/*
+
+  smoke-test-unix:
+    needs: snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            archive: git-kura_Linux_x86_64.tar.gz
+          - runner: ubuntu-24.04-arm
+            archive: git-kura_Linux_arm64.tar.gz
+          - runner: macos-15-intel
+            archive: git-kura_Darwin_x86_64.tar.gz
+          - runner: macos-15
+            archive: git-kura_Darwin_arm64.tar.gz
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: git-kura-snapshot-artifacts
+          path: dist
+
+      - name: Extract artifact
+        run: |
+          mkdir out
+          tar -xzf "dist/${{ matrix.archive }}" -C out
+          ls -la out
+
+      - name: Smoke test CLI
+        run: |
+          test -x out/git-kura
+          out/git-kura --help
+
+          mkdir -p "$RUNNER_TEMP/bin"
+          cp out/git-kura "$RUNNER_TEMP/bin/git-kura"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+
+          git kura --help
+
+      - name: Behavior smoke test
+        run: |
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+
+          git init
+          git config user.name "CI"
+          git config user.email "ci@example.invalid"
+          echo "hello" > README.md
+          git add README.md
+          git commit -m "init"
+
+          git kura open 1
+          git kura get 1 --path
+          git kura get 1 --branch
+          git kura ls
+          git kura close 1
+
+  smoke-test-windows:
+    needs: goreleaser-check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            archive: git-kura_Windows_x86_64.zip
+          - runner: windows-11-arm
+            archive: git-kura_Windows_arm64.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: git-kura-snapshot-artifacts
+          path: dist
+
+      - name: Extract artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Expand-Archive "dist/${{ matrix.archive }}" -DestinationPath out
+          Get-ChildItem out
+
+      - name: Smoke test CLI
+        shell: pwsh
+        run: |
+          $exe = Join-Path "out" "git-kura.exe"
+          if (!(Test-Path $exe)) {
+            throw "git-kura.exe not found"
+          }
+
+          & $exe --help
+
+          $bin = Join-Path $env:RUNNER_TEMP "bin"
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+          Copy-Item $exe (Join-Path $bin "git-kura.exe")
+          $env:PATH = "$bin;$env:PATH"
+
+          git kura --help
+
+      - name: Behavior smoke test
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:RUNNER_TEMP "bin"
+          $env:PATH = "$bin;$env:PATH"
+
+          $tmp = Join-Path $env:RUNNER_TEMP "git-kura-smoke"
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          Set-Location $tmp
+
+          git init
+          git config user.name "CI"
+          git config user.email "ci@example.invalid"
+          "hello" | Out-File README.md -Encoding utf8
+          git add README.md
+          git commit -m "init"
+
+          git kura open 1
+          git kura get 1 --path
+          git kura get 1 --branch
+          git kura ls
+          git kura close 1
