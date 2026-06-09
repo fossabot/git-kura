@@ -190,7 +190,7 @@ func TestGetBranch(t *testing.T) {
 	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
 	result := cli.gitKura(repo, "get", "51", "--branch")
 	requireExitCode(t, result, 0)
-	requireStdoutLine(t, result, "kura-51")
+	requireStdoutLine(t, result, "51")
 	requireCleanValueStdout(t, result)
 
 	invalid := cli.gitKura(repo, "get", "../x", "--branch")
@@ -280,8 +280,8 @@ func TestOpenDryRunPrintsPlannedWorktree(t *testing.T) {
 	requireConformsToOutputSchema(t, result.stdout)
 
 	metadata := requireJSONMetadata(t, result.stdout)
-	if metadata["branch"] != "kura-51" {
-		t.Fatalf("dry-run branch = %v, want kura-51", metadata["branch"])
+	if metadata["branch"] != "51" {
+		t.Fatalf("dry-run branch = %v, want 51", metadata["branch"])
 	}
 	if metadata["worktreePath"] != expectedWorktreePath(repo, "51") {
 		t.Fatalf("dry-run worktreePath = %v, want %s", metadata["worktreePath"], expectedWorktreePath(repo, "51"))

@@ -116,8 +116,8 @@ func TestRunCommandsInProcess(t *testing.T) {
 			t.Fatalf("open --dry-run error = %v", err)
 		}
 		dryRun := requireJSONMetadata(t, stdout)
-		if dryRun["branch"] != "kura-51" || dryRun["worktreePath"] != expectedWorktreePath(repo, "51") {
-			t.Fatalf("dry-run metadata = %+v, want branch kura-51 and path %s", dryRun, expectedWorktreePath(repo, "51"))
+		if dryRun["branch"] != "51" || dryRun["worktreePath"] != expectedWorktreePath(repo, "51") {
+			t.Fatalf("dry-run metadata = %+v, want branch 51 and path %s", dryRun, expectedWorktreePath(repo, "51"))
 		}
 
 		if err := run([]string{"open", "51"}); err != nil {
@@ -142,8 +142,8 @@ func TestRunCommandsInProcess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get --branch error = %v", err)
 		}
-		if strings.TrimSpace(stdout) != "kura-51" {
-			t.Fatalf("get --branch stdout = %q, want kura-51", stdout)
+		if strings.TrimSpace(stdout) != "51" {
+			t.Fatalf("get --branch stdout = %q, want 51", stdout)
 		}
 
 		stdout, err = captureStdout(t, func() error {

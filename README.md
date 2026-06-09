@@ -5,27 +5,27 @@
 
 git-kura is a keyed worktree resolver for Git.
 
-It maps issue, ticket, or task keys to deterministic Git worktrees for humans, AI coding agents, and reviewers.
+It maps issue, ticket, task or feature keys to deterministic Git worktrees for humans, AI coding agents, and reviewers.
 
 ```sh
-git kura open 51              # create a worktree for Issue #51
-git kura open 51 --dry-run    # print the worktree that would be created
-git kura get 51               # print the open worktree path for Issue #51
-git kura get 51 --path        # print the worktree path for Issue #51
-git kura get 51 --branch      # print the branch name for Issue #51
-git kura get 51 --root        # print the repository root path
-git kura get 51 --format json # print workspace metadata as JSON
-git kura get 51 --json        # alias of `--format json`
-git kura get 51 --format toon # print workspace metadata as TOON for AI prompts
-git kura get 51 --toon        # alias of `--format toon`
-git kura close 51             # remove the worktree for Issue #51
-git kura ls                   # list all open worktrees
+git kura open fizz              # create a worktree and branch for key "fizz"
+git kura open fizz --dry-run    # print the worktree that would be created
+git kura get fizz               # print the open worktree path for "fizz"
+git kura get fizz --path        # print the worktree path for "fizz"
+git kura get fizz --branch      # print the branch name for "fizz"
+git kura get fizz --root        # print the repository root path
+git kura get fizz --format json # print workspace metadata as JSON
+git kura get fizz --json        # alias of `--format json`
+git kura get fizz --format toon # print workspace metadata as TOON for AI prompts
+git kura get fizz --toon        # alias of `--format toon`
+git kura close fizz             # remove the worktree for "fizz"
+git kura ls                     # list all open worktrees
 ```
 
 ## Walkthrough
 
 ```sh
-git kura open hoge-feature             # create worktree in a repository. name don't have to be Issue number
+git kura open hoge-feature             # create a worktree and a branch in a repository
 cd $(git kura get hoge-feature)        # move to the worktree
 
 # edit, save and commit in the worktree
@@ -65,47 +65,47 @@ The same key should always resolve to the same workspace.
 
 ## Usage
 
-Open a worktree for issue `51`:
+Open a worktree for issue `fizz`:
 
 ```sh
-git kura open 51
+git kura open fizz
 ```
 
 Preview the worktree that would be created:
 
 ```sh
-git kura open 51 --dry-run
+git kura open fizz --dry-run
 ```
 
 Resolve the worktree path:
 
 ```sh
-cd "$(git kura get 51)"
+cd "$(git kura get fizz)"
 ```
 
 Resolve the branch name:
 
 ```sh
-git kura get 51 --branch
+git kura get fizz --branch
 ```
 
 Resolve the repository root path:
 
 ```sh
-git kura get 51 --root
+git kura get fizz --root
 ```
 
 Get machine-readable metadata:
 
 ```sh
-git kura get 51 --json
-git kura get 51 --toon
+git kura get fizz --json
+git kura get fizz --toon
 ```
 
-Close work on issue `51`:
+Close work on issue `fizz`:
 
 ```sh
-git kura close 51
+git kura close fizz
 ```
 
 See [docs/commands.md](docs/commands.md) for the command reference and [docs/output-format.md](docs/output-format.md) for structured output formats.

@@ -57,9 +57,9 @@ func TestBranchName(t *testing.T) {
 		key  string
 		want string
 	}{
-		{"51", "kura-51"},
-		{"ABC-123", "kura-ABC-123"},
-		{"release-2026-06", "kura-release-2026-06"},
+		{"51", "51"},
+		{"ABC-123", "ABC-123"},
+		{"release-2026-06", "release-2026-06"},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			if got := branchName(tc.key); got != tc.want {
@@ -455,7 +455,7 @@ func TestPrintTOONFormat(t *testing.T) {
 		SchemaVersion:  1,
 		Key:            "test-51",
 		Kind:           "worktree",
-		Branch:         "kura-test-51",
+		Branch:         "test-51",
 		WorktreePath:   "/repo/.git/kura/worktrees/test-51",
 		RepositoryRoot: "/repo",
 		BaseBranch:     "main",
@@ -480,7 +480,7 @@ func TestPrintTOONFields(t *testing.T) {
 		SchemaVersion:  1,
 		Key:            "test-51",
 		Kind:           "worktree",
-		Branch:         "kura-test-51",
+		Branch:         "test-51",
 		WorktreePath:   "/repo/.git/kura/worktrees/test-51",
 		RepositoryRoot: "/repo",
 		BaseBranch:     "main",
@@ -497,7 +497,7 @@ func TestPrintTOONFields(t *testing.T) {
 		"schemaVersion":  "schemaVersion: 1",
 		"key":            "key: test-51",
 		"kind":           "kind: worktree",
-		"branch":         "branch: kura-test-51",
+		"branch":         "branch: test-51",
 		"worktreePath":   "worktreePath: /repo/.git/kura/worktrees/test-51",
 		"repositoryRoot": "repositoryRoot: /repo",
 		"baseBranch":     "baseBranch: main",

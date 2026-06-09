@@ -52,7 +52,7 @@ const getHelp = `Usage: git kura get <key> [flags]
 
 Print worktree information for <key>.
 
-All output modes require the worktree to be open.
+Scalar and structured output require the worktree to be open.
 
 Flags:
   --path          Print the worktree filesystem path (default)
@@ -65,7 +65,7 @@ Flags:
 
 const openHelp = `Usage: git kura open <key> [flags]
 
-Create a git worktree for <key> on a new branch kura-<key>.
+Create a git worktree for <key> on a new branch <key>.
 
 Flags:
   --dry-run       Print the worktree that would be created as JSON`
@@ -661,7 +661,7 @@ func metadataPathInStateDir(stateDir, key string) string {
 }
 
 func branchName(key string) string {
-	return "kura-" + key
+	return key
 }
 
 // Validation
