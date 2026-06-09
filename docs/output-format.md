@@ -51,16 +51,5 @@ Use TOON when passing workspace context to an LLM prompt or coding agent. JSON r
 
 ## Metadata schema
 
-Both JSON and TOON output are derived from the same internal model:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `schemaVersion` | integer | Schema version of this output |
-| `key` | string | The key passed to the command |
-| `kind` | string | Workspace kind (e.g. `"worktree"`) |
-| `branch` | string | Git branch name associated with the key |
-| `worktreePath` | string | Absolute path to the worktree |
-| `repositoryRoot` | string | Absolute path to the repository root |
-| `baseBranch` | string | Branch the worktree was created from |
-| `exists` | boolean | Whether the worktree currently exists on disk |
-| `dirty` | boolean | Whether the worktree has uncommitted changes |
+The JSON Schema is defined in [`cmd/kura/schema/output.schema.json`](../cmd/kura/schema/output.schema.json)
+and is embedded in the binary for runtime output validation.
