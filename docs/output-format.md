@@ -51,6 +51,20 @@ git kura get 51 --toon
 git kura get 51 --format toon
 ```
 
+Example output:
+
+```toon
+schemaVersion: 1
+key: fizz
+kind: worktree
+branch: fizz
+worktreePath: /workspaces/git-kura/.git/kura/worktrees/fizz
+repositoryRoot: /workspaces/git-kura
+baseBranch: main
+exists: true
+dirty: false
+```
+
 Use TOON when passing workspace context to an LLM prompt or coding agent. JSON remains the compatibility contract for external tools; TOON is not a replacement.
 
 ## Metadata schema
