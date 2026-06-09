@@ -100,7 +100,7 @@ jobs:
           git kura close 1
 
   smoke-test-windows:
-    needs: goreleaser-check
+    needs: snapshot
     strategy:
       fail-fast: false
       matrix:
