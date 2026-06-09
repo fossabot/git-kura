@@ -28,7 +28,7 @@ Kura is intentionally small. It is not a Git client, an AI agent manager, a pull
 
 ## Why Kura?
 
-When using Git worktrees with multi AI coding agents, it is easy to lose track of which worktree belongs to which task.
+When using Git worktrees with multiple AI coding agents, it is easy to lose track of which worktree belongs to which task.
 
 For example, one agent may implement a change in a task-specific worktree while another tool or reviewer needs to inspect that exact worktree later. If the review target is selected manually, the workflow becomes fragile.
 
@@ -42,15 +42,15 @@ task key
 
 The same key should always resolve to the same workspace.
 
-## Example
+## Usage
 
-Open worktree on issue `51`:
+Open a worktree for issue `51`:
 
 ```sh
 git kura open 51
 ```
 
-Resolve the worktree path for issue `51`:
+Resolve the worktree path:
 
 ```sh
 cd "$(git kura get 51 --path)"
@@ -66,156 +66,16 @@ Get machine-readable metadata:
 
 ```sh
 git kura get 51 --json
-```
-
-close work on issue `51`:
-
-```sh
-git kura close 51
-```
-
-## Commands
-
-### `git kura open <key>`
-
-Create the branch and worktree for the given key.
-
-```sh
-git kura open 51
-```
-
-If the corresponding branch or worktree already exists, Kura should not create a conflicting workspace.
-
-### `git kura get <key>`
-
-Resolve the branch or worktree associated with the given key.
-
-```sh
-git kura get 51 --path
-git kura get 51 --branch
-git kura get 51 --json
-```
-
-This command is designed for both humans and scripts.
-
-For example:
-
-```sh
-codex review "$(git kura get 51 --path)"
-```
-
-See [docs/output-format.md](docs/output-format.md) for the full metadata schema and output format reference.
-
-### `git kura close <key>`
-
-Remove the worktree associated with the given key.
-
-```sh
-git kura close 51
-```
-
-Kura should refuse to remove a worktree when doing so would discard uncommitted changes unless explicitly instructed.
-
-## Keys
-
-A key is an opaque, case-sensitive string identifier.
-
-Kura does not parse keys as numbers.
-Kura does not resolve keys through GitHub, GitLab, or any issue tracker.
-
-In v0, a key must match:
-
-```
-[A-Za-z0-9][A-Za-z0-9._-]{0,127}
-```
-
-Additionally, Kura rejects keys that:
-
-- are `"."` or `".."`
-- contain `".."`
-- start with `"."`
-- end with `"."`
-- end with `".lock"`
-- contain path separators `"/"` or `"\"`
-- contain whitespace
-- contain control characters
-- contain shell metacharacters
-- contain Git ref expression syntax such as `"@{"`
-
-## Exit codes
-
-Kura uses stable exit codes so scripts and AI-agent workflows can react correctly.
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Usage error |
-| 3 | Unsafe operation refused |
-| 4 | Not found |
-
-## Design principles
-
-### 1. The key is the source of truth
-
-Kura should not require users or agents to remember worktree paths manually. The task key should be enough.
-
-```sh
-git kura get 51 --path
-```
-
-### 2. Output should be script-friendly
-
-Commands that return values should be usable in shell scripts without extra formatting.
-
-```sh
-cd "$(git kura get 51 --path)"
-```
-
-For structured output, use JSON:
-
-```sh
-git kura get 51 --json
-```
-
-For AI prompts, `kura` provide [TOON](https://github.com/toon-format/toon):
-
-```sh
 git kura get 51 --toon
 ```
 
-### 3. Kura should stay small
+Close work on issue `51`:
 
-Kura should not become an AI session manager, TUI Git client, pull request orchestrator, or issue tracker client.
+```sh
+git kura close 51
+```
 
-Those tools may integrate with Kura, but Kura itself should remain focused on keyed worktree lifecycle management.
-
-### 4. Safety over convenience
-
-Removing a worktree should be conservative.
-
-Kura should check for conditions such as:
-
-* uncommitted changes
-* untracked files
-* missing worktree paths
-* branch/worktree mismatches
-* dirty submodules, if applicable
-
-When in doubt, Kura should stop and explain what must be resolved manually.
-
-## Non-goals
-
-Kura does not aim to:
-
-* manage AI coding sessions
-* create or review pull requests
-* replace GitHub CLI, GitLab CLI, or other issue tracker tools
-* provide a full Git TUI
-* infer the correct worktree from natural language
-* classify or evaluate task priority
-
-Kura only manages the mapping between a key and a Git worktree.
+See [docs/commands.md](docs/commands.md) for the command reference and [docs/output-format.md](docs/output-format.md) for structured output formats.
 
 ## Installation
 
@@ -233,16 +93,12 @@ This produces `./bin/git-kura`. Place it somewhere on `PATH` so Git can find it 
 cp ./bin/git-kura /usr/local/bin/git-kura
 ```
 
-## Platform support
+## Documentation
 
-Kura supports macOS, Linux, and Windows.
-
-Path handling uses platform-aware APIs. Git branch names and filesystem paths are treated as distinct:
-
-```
-branch: issue/51
-path:   <repo>-issue-51  (platform path separator)
-```
+* [Commands](docs/commands.md)
+* [Output formats](docs/output-format.md)
+* [Design](docs/design.md)
+* [Architecture decision records](docs/adr/)
 
 ## Status
 
