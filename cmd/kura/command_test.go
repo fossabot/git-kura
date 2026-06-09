@@ -18,6 +18,8 @@ func TestRunHelpAndUsage(t *testing.T) {
 	}{
 		{name: "top-level short help", args: []string{"-h"}, want: "Usage: git kura"},
 		{name: "top-level long help", args: []string{"--help"}, want: "Usage: git kura"},
+		{name: "short version", args: []string{"-v"}, want: version},
+		{name: "long version", args: []string{"--version"}, want: version},
 		{name: "get help", args: []string{"get", "--help"}, want: "Usage: git kura get"},
 		{name: "open help", args: []string{"open", "--help"}, want: "Usage: git kura open"},
 		{name: "close help", args: []string{"close", "--help"}, want: "Usage: git kura close"},

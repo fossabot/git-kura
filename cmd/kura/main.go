@@ -38,6 +38,8 @@ func mustCompileOutputSchema() *jsonschema.Schema {
 
 // Entrypoint and dispatch
 
+var version = "0.0.0-alpha"
+
 const topLevelHelp = `Usage: git kura <command> [key] [flags]
 
 Commands:
@@ -93,6 +95,10 @@ func run(args []string) error {
 	switch args[0] {
 	case "-h", "--help":
 		fmt.Println(topLevelHelp)
+		return nil
+
+	case "-v", "--version":
+		fmt.Println(version)
 		return nil
 
 	case "get":
