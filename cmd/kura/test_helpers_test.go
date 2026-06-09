@@ -175,7 +175,11 @@ func appendFile(t *testing.T, path, content string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	if _, err := file.WriteString(content); err != nil {
 		t.Fatal(err)
 	}
