@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -183,10 +184,6 @@ func TestGetPath(t *testing.T) {
 	requireStdoutLine(t, result, expectedWorktreePath(repo, "51"))
 	requireCleanValueStdout(t, result)
 
-	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
-	commandSubstitution := cli.shell(repo, `cd "$(git kura get 51 --path)"`)
-	requireExitCode(t, commandSubstitution, 0)
-
 	invalid := cli.gitKura(repo, "get", "../x", "--path")
 	requireNonZeroExitCode(t, invalid)
 	requireEmptyStdout(t, invalid)
@@ -194,6 +191,32 @@ func TestGetPath(t *testing.T) {
 	outside := cli.gitKura(t.TempDir(), "get", "51", "--path")
 	requireNonZeroExitCode(t, outside)
 	requireEmptyStdout(t, outside)
+}
+
+func TestGetPathCommandSubstitutionPOSIX(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell command substitution is covered by the Windows-specific test")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	result := cli.posixShell(repo, `cd "$(git kura get 51 --path)"`)
+	requireExitCode(t, result, 0)
+}
+
+func TestGetPathCommandSubstitutionWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows command substitution is covered on Windows")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	result := cli.windowsCommand(repo, `for /f "delims=" %p in ('git kura get 51 --path') do cd /d "%p"`)
+	requireExitCode(t, result, 0)
 }
 
 func TestGetBranch(t *testing.T) {
@@ -218,16 +241,70 @@ func TestCloseRemovesWorktreeAndMetadata(t *testing.T) {
 	repo := cli.initRepo(t)
 
 	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
-
 	metadataPath := expectedMetadataPath(repo, "51")
-	if err := os.MkdirAll(filepath.Dir(metadataPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, metadataPath, "{}\n")
+	assertPathExists(t, expectedWorktreePath(repo, "51"))
+	assertPathExists(t, metadataPath)
 
 	requireExitCode(t, cli.gitKura(repo, "close", "51"), 0)
 	assertPathMissing(t, expectedWorktreePath(repo, "51"))
 	assertPathMissing(t, metadataPath)
+}
+
+func TestOpenCreatesMetadata(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	metadataPath := expectedMetadataPath(repo, "51")
+	assertPathExists(t, metadataPath)
+
+	metadata := requireJSONFile(t, metadataPath)
+	if metadata["baseBranch"] != "main" {
+		t.Fatalf("metadata baseBranch = %v, want main", metadata["baseBranch"])
+	}
+	if metadata["worktreePath"] != expectedWorktreePath(repo, "51") {
+		t.Fatalf("metadata worktreePath = %v, want %s", metadata["worktreePath"], expectedWorktreePath(repo, "51"))
+	}
+}
+
+func TestGetStructuredOutputUsesOpenTimeBaseBranch(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	git(t, repo, "checkout", "-b", "later")
+
+	result := cli.gitKura(repo, "get", "51", "--json")
+	requireExitCode(t, result, 0)
+
+	metadata := requireJSONMetadata(t, result.stdout)
+	if metadata["baseBranch"] != "main" {
+		t.Fatalf("json baseBranch = %v, want open-time base branch main", metadata["baseBranch"])
+	}
+}
+
+func TestGetStructuredOutputFailsWhenMetadataIsMissing(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	if err := os.Remove(expectedMetadataPath(repo, "51")); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+
+	jsonResult := cli.gitKura(repo, "get", "51", "--json")
+	requireNonZeroExitCode(t, jsonResult)
+	requireEmptyStdout(t, jsonResult)
+	requireStderrContains(t, jsonResult, "metadata")
+
+	toonResult := cli.gitKura(repo, "get", "51", "--toon")
+	requireNonZeroExitCode(t, toonResult)
+	requireEmptyStdout(t, toonResult)
+	requireStderrContains(t, toonResult, "metadata")
+
+	requireStdoutLine(t, cli.gitKura(repo, "get", "51", "--path"), expectedWorktreePath(repo, "51"))
+	requireStdoutLine(t, cli.gitKura(repo, "get", "51", "--branch"), "kura-51")
 }
 
 func TestGetStructuredOutputOptions(t *testing.T) {
@@ -263,6 +340,31 @@ func TestGetStructuredOutputOptions(t *testing.T) {
 	requireStderrContains(t, unknown, "format")
 	requireStderrContains(t, unknown, "json")
 	requireStderrContains(t, unknown, "toon")
+}
+
+func TestGetTOONOutputContainsMetadataFields(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	result := cli.gitKura(repo, "get", "51", "--toon")
+	requireExitCode(t, result, 0)
+
+	for _, want := range []string{
+		"schemaVersion",
+		"key",
+		"kind",
+		"branch",
+		"worktreePath",
+		"repositoryRoot",
+		"baseBranch",
+		"exists",
+		"dirty",
+	} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("toon output = %q, want it to contain field %q", result.stdout, want)
+		}
+	}
 }
 
 func TestGetOutputOptionConflicts(t *testing.T) {
@@ -520,6 +622,10 @@ func TestParseKeyOnlyArgs(t *testing.T) {
 	})
 }
 
+func TestRequireCleanValueStdoutAcceptsWindowsPath(t *testing.T) {
+	requireCleanValueStdout(t, cliResult{stdout: `C:\repo.kura\worktrees\51` + "\n"})
+}
+
 // Test helpers
 
 type cliResult struct {
@@ -571,9 +677,17 @@ func (c *testCLI) gitKura(dir string, args ...string) cliResult {
 	return c.run(dir, append([]string{"kura"}, args...)...)
 }
 
-func (c *testCLI) shell(dir, script string) cliResult {
+func (c *testCLI) posixShell(dir, script string) cliResult {
 	c.t.Helper()
 	cmd := exec.Command("sh", "-c", script)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+c.envPath)
+	return runCommand(cmd)
+}
+
+func (c *testCLI) windowsCommand(dir, script string) cliResult {
+	c.t.Helper()
+	cmd := exec.Command("cmd", "/C", script)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "PATH="+c.envPath)
 	return runCommand(cmd)
@@ -721,6 +835,13 @@ func assertPathMissing(t *testing.T, path string) {
 	}
 }
 
+func assertPathExists(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("%s should exist: %v", path, err)
+	}
+}
+
 func requireJSONMetadata(t *testing.T, output string) map[string]any {
 	t.Helper()
 	var metadata map[string]any
@@ -728,6 +849,15 @@ func requireJSONMetadata(t *testing.T, output string) map[string]any {
 		t.Fatalf("json output is not parseable: %v\n%s", err, output)
 	}
 	return metadata
+}
+
+func requireJSONFile(t *testing.T, path string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read json file %s: %v", path, err)
+	}
+	return requireJSONMetadata(t, string(data))
 }
 
 func requireConformsToOutputSchema(t *testing.T, jsonOutput string) {
