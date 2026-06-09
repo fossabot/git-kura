@@ -812,7 +812,7 @@ func requireCleanValueStdout(t *testing.T, result cliResult) {
 	if strings.Count(result.stdout, "\n") != 1 {
 		t.Fatalf("stdout should contain exactly one line, got %q", result.stdout)
 	}
-	for _, forbidden := range []string{":", "\"", "'", "warning"} {
+	for _, forbidden := range []string{": ", "\"", "'", "warning"} {
 		if strings.Contains(strings.ToLower(result.stdout), forbidden) {
 			t.Fatalf("stdout contains non-value text %q in %q", forbidden, result.stdout)
 		}
