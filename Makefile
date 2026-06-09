@@ -18,6 +18,10 @@ vet:
 test:
 	go test ./...
 
+.PHONY: coverage
+coverage:
+	go test -covermode=atomic -coverprofile=coverage.out ./...
+
 .PHONY: vuln
 vuln:
 	go tool govulncheck ./...
@@ -31,4 +35,4 @@ build:
 	go build -o ./bin/git-kura ./cmd/kura
 
 .PHONY: check
-check: fmt-check vet test vuln
+check: fmt-check vet coverage vuln
