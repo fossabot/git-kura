@@ -6,12 +6,7 @@
   "runArgs": [
     "--init"
   ],
-  "postCreateCommand": {
-    "setup-git": [
-      "sh",
-      "scripts/dev/setup-git-config.sh"
-    ]
-  },
+  "postCreateCommand": "sh scripts/setup-dev.sh",
   "customizations": {
     "vscode": {
       "extensions": [
