@@ -1,3 +1,5 @@
+COVERAGE_THRESHOLD ?= 90
+
 .PHONY: fmt
 fmt:
 	gofmt -w $$(find . -name '*.go')
@@ -21,6 +23,8 @@ test:
 .PHONY: coverage
 coverage:
 	go test -covermode=atomic -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
+	@go tool cover -func=coverage.out | awk -v threshold="$(COVERAGE_THRESHOLD)" '/^total:/ { coverage=$$3; sub(/%/, "", coverage); if (coverage + 0 < threshold + 0) { printf("coverage %.1f%% is below %.1f%%\n", coverage, threshold); exit 1 } printf("coverage %.1f%% meets %.1f%% threshold\n", coverage, threshold) }'
 
 .PHONY: vuln
 vuln:
