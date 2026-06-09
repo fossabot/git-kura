@@ -404,6 +404,7 @@ func cmdOpen(key string, opts openOptions) error {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
+	fmt.Println(path)
 	return nil
 }
 
