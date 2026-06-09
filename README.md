@@ -13,12 +13,28 @@ git kura open 51 --dry-run    # print the worktree that would be created
 git kura get 51               # print the open worktree path for Issue #51
 git kura get 51 --path        # print the worktree path for Issue #51
 git kura get 51 --branch      # print the branch name for Issue #51
+git kura get 51 --root        # print the repository root path
 git kura get 51 --format json # print workspace metadata as JSON
 git kura get 51 --json        # alias of `--format json`
 git kura get 51 --format toon # print workspace metadata as TOON for AI prompts
 git kura get 51 --toon        # alias of `--format toon`
 git kura close 51             # remove the worktree for Issue #51
 git kura ls                   # list all open worktrees
+```
+
+## Walkthrough
+
+```sh
+git kura open hoge-feature             # create worktree in a repository. name don't have to be Issue number
+cd $(git kura get hoge-feature)        # move to the worktree
+
+# edit, save and commit in the worktree
+
+cd $(git kura get hoge-feature --root) # move to the repository root
+
+git merge hoge-feature                 # merge changes to main stream
+
+git kura close hoge-feature            # clean up worktree and branch
 ```
 
 ## Concept
@@ -71,6 +87,12 @@ Resolve the branch name:
 
 ```sh
 git kura get 51 --branch
+```
+
+Resolve the repository root path:
+
+```sh
+git kura get 51 --root
 ```
 
 Get machine-readable metadata:

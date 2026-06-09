@@ -145,6 +145,16 @@ func TestParseGetArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("--root produces root output mode", func(t *testing.T) {
+		_, opts, err := parseGetArgs([]string{"51", "--root"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if opts.OutputMode != outputRoot {
+			t.Fatalf("OutputMode = %q, want %q", opts.OutputMode, outputRoot)
+		}
+	})
+
 	t.Run("--toon and --format toon produce same output mode", func(t *testing.T) {
 		_, shortOpts, err := parseGetArgs([]string{"51", "--toon"})
 		if err != nil {
@@ -187,6 +197,11 @@ func TestParseGetArgs(t *testing.T) {
 	for _, args := range [][]string{
 		{"51", "--path", "--path"},
 		{"51", "--path", "--branch"},
+		{"51", "--path", "--root"},
+		{"51", "--root", "--path"},
+		{"51", "--root", "--branch"},
+		{"51", "--root", "--json"},
+		{"51", "--root", "--toon"},
 		{"51", "--json", "--toon"},
 		{"51", "--path", "--json"},
 		{"51", "--branch", "--json"},

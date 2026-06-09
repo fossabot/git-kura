@@ -202,6 +202,30 @@ func TestGetBranch(t *testing.T) {
 	requireEmptyStdout(t, outside)
 }
 
+func TestGetRoot(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	missing := cli.gitKura(repo, "get", "51", "--root")
+	requireNonZeroExitCode(t, missing)
+	requireEmptyStdout(t, missing)
+	requireStderrContains(t, missing, "not open")
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	result := cli.gitKura(repo, "get", "51", "--root")
+	requireExitCode(t, result, 0)
+	requireStdoutLine(t, result, repo)
+	requireCleanValueStdout(t, result)
+
+	invalid := cli.gitKura(repo, "get", "../x", "--root")
+	requireNonZeroExitCode(t, invalid)
+	requireEmptyStdout(t, invalid)
+
+	outside := cli.gitKura(t.TempDir(), "get", "51", "--root")
+	requireNonZeroExitCode(t, outside)
+	requireEmptyStdout(t, outside)
+}
+
 func TestCloseRemovesWorktreeAndMetadata(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)

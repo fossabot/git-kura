@@ -52,11 +52,12 @@ const getHelp = `Usage: git kura get <key> [flags]
 
 Print worktree information for <key>.
 
-Scalar and structured output require the worktree to be open.
+All output modes require the worktree to be open.
 
 Flags:
   --path          Print the worktree filesystem path (default)
   --branch        Print the branch name
+  --root          Print the repository root path
   --json          Print structured metadata as JSON
   --toon          Print structured metadata as TOML-like text
   --format json   Same as --json
@@ -159,6 +160,7 @@ type outputMode string
 const (
 	outputPath   outputMode = "path"
 	outputBranch outputMode = "branch"
+	outputRoot   outputMode = "root"
 	outputJSON   outputMode = "json"
 	outputTOON   outputMode = "toon"
 )
@@ -195,6 +197,11 @@ func parseGetArgs(args []string) (string, getOptions, error) {
 				return "", getOptions{}, fmt.Errorf("conflict: --%s and --branch cannot be used together", mode)
 			}
 			mode = outputBranch
+		case "--root":
+			if mode != "" {
+				return "", getOptions{}, fmt.Errorf("conflict: --%s and --root cannot be used together", mode)
+			}
+			mode = outputRoot
 		case "--json":
 			if mode != "" {
 				return "", getOptions{}, fmt.Errorf("conflict: --%s and --json cannot be used together", mode)
@@ -308,6 +315,10 @@ func cmdGet(key string, opts getOptions) error {
 	}
 	if opts.OutputMode == outputBranch {
 		fmt.Println(branch)
+		return nil
+	}
+	if opts.OutputMode == outputRoot {
+		fmt.Println(repoRoot)
 		return nil
 	}
 

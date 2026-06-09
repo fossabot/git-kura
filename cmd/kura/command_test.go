@@ -100,6 +100,16 @@ func TestRunCommandsInProcess(t *testing.T) {
 		}
 
 		stdout, err = captureStdout(t, func() error {
+			return run([]string{"get", "51", "--root"})
+		})
+		if err == nil {
+			t.Fatal("get --root before open error = nil, want error")
+		}
+		if stdout != "" {
+			t.Fatalf("get --root before open stdout = %q, want empty", stdout)
+		}
+
+		stdout, err = captureStdout(t, func() error {
 			return run([]string{"open", "51", "--dry-run"})
 		})
 		if err != nil {
@@ -134,6 +144,16 @@ func TestRunCommandsInProcess(t *testing.T) {
 		}
 		if strings.TrimSpace(stdout) != "kura-51" {
 			t.Fatalf("get --branch stdout = %q, want kura-51", stdout)
+		}
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"get", "51", "--root"})
+		})
+		if err != nil {
+			t.Fatalf("get --root error = %v", err)
+		}
+		if strings.TrimSpace(stdout) != repo {
+			t.Fatalf("get --root stdout = %q, want %q", stdout, repo)
 		}
 
 		stdout, err = captureStdout(t, func() error {
@@ -192,6 +212,7 @@ func TestRunCommandsOutsideRepositoryInProcess(t *testing.T) {
 	withWorkingDir(t, outside, func() {
 		for _, args := range [][]string{
 			{"get", "51", "--path"},
+			{"get", "51", "--root"},
 			{"get", "51", "--json"},
 			{"open", "51"},
 			{"close", "51"},

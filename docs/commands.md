@@ -29,6 +29,7 @@ Resolve the branch or worktree associated with the given key.
 git kura get 51
 git kura get 51 --path
 git kura get 51 --branch
+git kura get 51 --root
 git kura get 51 --json
 git kura get 51 --toon
 ```
@@ -43,6 +44,13 @@ For example:
 
 ```sh
 codex review "$(git kura get 51)"
+```
+
+`--root` prints the repository root path. This is useful for scripts that need to
+locate files relative to the repository while operating inside a worktree:
+
+```sh
+root="$(git kura get 51 --root)"
 ```
 
 See [output-format.md](output-format.md) for the full metadata schema and output
