@@ -71,13 +71,13 @@ jobs:
       - name: Smoke test CLI
         run: |
           test -x out/git-kura
-          out/git-kura --help
+          out/git-kura -h
 
           mkdir -p "$RUNNER_TEMP/bin"
           cp out/git-kura "$RUNNER_TEMP/bin/git-kura"
           export PATH="$RUNNER_TEMP/bin:$PATH"
 
-          git kura --help
+          git kura -h
 
       - name: Behavior smoke test
         run: |
@@ -131,14 +131,14 @@ jobs:
             throw "git-kura.exe not found"
           }
 
-          & $exe --help
+          & $exe -h
 
           $bin = Join-Path $env:RUNNER_TEMP "bin"
           New-Item -ItemType Directory -Force -Path $bin | Out-Null
           Copy-Item $exe (Join-Path $bin "git-kura.exe")
           $env:PATH = "$bin;$env:PATH"
 
-          git kura --help
+          git kura -h
 
       - name: Behavior smoke test
         shell: pwsh
