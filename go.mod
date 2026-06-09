@@ -4,7 +4,10 @@ go 1.26.3
 
 tool golang.org/x/vuln/cmd/govulncheck
 
-require github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+require (
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/toon-format/toon-go v0.0.0-20251202084852-7ca0e27c4e8c
+)
 
 require (
 	golang.org/x/mod v0.35.0 // indirect

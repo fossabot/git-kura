@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	toon "github.com/toon-format/toon-go"
 )
 
 //go:embed schema/output.schema.json
@@ -333,12 +334,7 @@ func cmdGet(key string, opts getOptions) error {
 	case outputJSON:
 		return printJSON(data)
 	case outputTOON:
-		fmt.Printf(
-			"schemaVersion = %d\nkey = %s\nkind = %s\nbranch = %s\npath = %s\nworktreePath = %s\nrepositoryRoot = %s\nbaseBranch = %s\nexists = %v\ndirty = %v\n",
-			data.SchemaVersion, data.Key, data.Kind, data.Branch,
-			data.WorktreePath, data.WorktreePath,
-			data.RepositoryRoot, data.BaseBranch, data.Exists, data.Dirty,
-		)
+		return printTOON(data)
 	}
 
 	return nil
@@ -415,6 +411,15 @@ func printJSON(data worktreeJSON) error {
 		return fmt.Errorf("internal: json output does not conform to schema: %w", err)
 	}
 	fmt.Println(string(out))
+	return nil
+}
+
+func printTOON(data worktreeJSON) error {
+	out, err := toon.MarshalString(data)
+	if err != nil {
+		return fmt.Errorf("internal: toon encoding failed: %w", err)
+	}
+	fmt.Println(out)
 	return nil
 }
 
@@ -545,15 +550,15 @@ func readStructuredMetadata(repoRoot, key, worktreePath string, worktreeExists b
 }
 
 type worktreeJSON struct {
-	SchemaVersion  int    `json:"schemaVersion"`
-	Key            string `json:"key"`
-	Kind           string `json:"kind"`
-	Branch         string `json:"branch"`
-	WorktreePath   string `json:"worktreePath"`
-	RepositoryRoot string `json:"repositoryRoot"`
-	BaseBranch     string `json:"baseBranch"`
-	Exists         bool   `json:"exists"`
-	Dirty          bool   `json:"dirty"`
+	SchemaVersion  int    `json:"schemaVersion"  toon:"schemaVersion"`
+	Key            string `json:"key"            toon:"key"`
+	Kind           string `json:"kind"           toon:"kind"`
+	Branch         string `json:"branch"         toon:"branch"`
+	WorktreePath   string `json:"worktreePath"   toon:"worktreePath"`
+	RepositoryRoot string `json:"repositoryRoot" toon:"repositoryRoot"`
+	BaseBranch     string `json:"baseBranch"     toon:"baseBranch"`
+	Exists         bool   `json:"exists"         toon:"exists"`
+	Dirty          bool   `json:"dirty"          toon:"dirty"`
 }
 
 // Git and workspace resolution

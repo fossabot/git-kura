@@ -435,6 +435,71 @@ func TestPrintJSONRejectsInvalidData(t *testing.T) {
 	}
 }
 
+func TestPrintTOONFormat(t *testing.T) {
+	data := worktreeJSON{
+		SchemaVersion:  1,
+		Key:            "test-51",
+		Kind:           "worktree",
+		Branch:         "kura-test-51",
+		WorktreePath:   "/repo/.git/kura/worktrees/test-51",
+		RepositoryRoot: "/repo",
+		BaseBranch:     "main",
+		Exists:         true,
+		Dirty:          false,
+	}
+
+	stdout, err := captureStdout(t, func() error { return printTOON(data) })
+	if err != nil {
+		t.Fatalf("printTOON error = %v", err)
+	}
+
+	for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+		if !strings.Contains(line, ": ") {
+			t.Errorf("line %q does not use ': ' separator", line)
+		}
+	}
+}
+
+func TestPrintTOONFields(t *testing.T) {
+	data := worktreeJSON{
+		SchemaVersion:  1,
+		Key:            "test-51",
+		Kind:           "worktree",
+		Branch:         "kura-test-51",
+		WorktreePath:   "/repo/.git/kura/worktrees/test-51",
+		RepositoryRoot: "/repo",
+		BaseBranch:     "main",
+		Exists:         true,
+		Dirty:          false,
+	}
+
+	stdout, err := captureStdout(t, func() error { return printTOON(data) })
+	if err != nil {
+		t.Fatalf("printTOON error = %v", err)
+	}
+
+	for field, want := range map[string]string{
+		"schemaVersion":  "schemaVersion: 1",
+		"key":            "key: test-51",
+		"kind":           "kind: worktree",
+		"branch":         "branch: kura-test-51",
+		"worktreePath":   "worktreePath: /repo/.git/kura/worktrees/test-51",
+		"repositoryRoot": "repositoryRoot: /repo",
+		"baseBranch":     "baseBranch: main",
+		"exists":         "exists: true",
+		"dirty":          "dirty: false",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("field %q: stdout does not contain %q\nfull output:\n%s", field, want, stdout)
+		}
+	}
+
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 9 {
+		t.Errorf("line count = %d, want 9\nfull output:\n%s", len(lines), stdout)
+	}
+}
+
 func TestMetadataPath(t *testing.T) {
 	stateDir := filepath.Join("/home", "user", "repo", ".git", "kura")
 	want := filepath.Join("/home", "user", "repo", ".git", "kura", "meta", "worktrees", "51.json")
