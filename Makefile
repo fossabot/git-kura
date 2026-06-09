@@ -1,5 +1,8 @@
 COVERAGE_THRESHOLD ?= 90
 
+.PHONY: setup
+setup: tidy build
+
 .PHONY: fmt
 fmt:
 	gofmt -w $$(find . -name '*.go')
