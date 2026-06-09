@@ -70,6 +70,53 @@ func TestRunCommandsInProcess(t *testing.T) {
 		stdout, err := captureStdout(t, func() error {
 			return run([]string{"get", "51", "--path"})
 		})
+		if err == nil {
+			t.Fatal("get --path before open error = nil, want error")
+		}
+		if stdout != "" {
+			t.Fatalf("get --path before open stdout = %q, want empty", stdout)
+		}
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"get", "51", "--branch"})
+		})
+		if err == nil {
+			t.Fatal("get --branch before open error = nil, want error")
+		}
+		if stdout != "" {
+			t.Fatalf("get --branch before open stdout = %q, want empty", stdout)
+		}
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"get", "51", "--json"})
+		})
+		if err == nil {
+			t.Fatal("get --json before open error = nil, want error")
+		}
+		if stdout != "" {
+			t.Fatalf("get --json before open stdout = %q, want empty", stdout)
+		}
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"open", "51", "--dry-run"})
+		})
+		if err != nil {
+			t.Fatalf("open --dry-run error = %v", err)
+		}
+		dryRun := requireJSONMetadata(t, stdout)
+		if dryRun["branch"] != "kura-51" || dryRun["worktreePath"] != expectedWorktreePath(repo, "51") {
+			t.Fatalf("dry-run metadata = %+v, want branch kura-51 and path %s", dryRun, expectedWorktreePath(repo, "51"))
+		}
+
+		if err := run([]string{"open", "51"}); err != nil {
+			t.Fatalf("open error = %v", err)
+		}
+		assertPathExists(t, expectedWorktreePath(repo, "51"))
+		assertPathExists(t, expectedMetadataPath(repo, "51"))
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"get", "51", "--path"})
+		})
 		if err != nil {
 			t.Fatalf("get --path error = %v", err)
 		}
@@ -86,23 +133,6 @@ func TestRunCommandsInProcess(t *testing.T) {
 		if strings.TrimSpace(stdout) != "kura-51" {
 			t.Fatalf("get --branch stdout = %q, want kura-51", stdout)
 		}
-
-		stdout, err = captureStdout(t, func() error {
-			return run([]string{"get", "51", "--json"})
-		})
-		if err != nil {
-			t.Fatalf("get --json before open error = %v", err)
-		}
-		metadata := requireJSONMetadata(t, stdout)
-		if metadata["exists"] != false {
-			t.Fatalf("exists = %v, want false before open", metadata["exists"])
-		}
-
-		if err := run([]string{"open", "51"}); err != nil {
-			t.Fatalf("open error = %v", err)
-		}
-		assertPathExists(t, expectedWorktreePath(repo, "51"))
-		assertPathExists(t, expectedMetadataPath(repo, "51"))
 
 		stdout, err = captureStdout(t, func() error {
 			return run([]string{"get", "51", "--toon"})

@@ -20,6 +20,7 @@ JSON is the canonical machine-readable format. Use it for scripts, tools, and in
 ```sh
 git kura get 51 --json
 git kura get 51 --format json
+git kura open 51 --dry-run
 ```
 
 Example output:
@@ -37,6 +38,9 @@ Example output:
   "dirty": false
 }
 ```
+
+`git kura open <key> --dry-run` uses the same JSON schema. In dry-run output,
+`baseBranch` is the current branch, `exists` is `false`, and `dirty` is `false`.
 
 ### TOON (`--toon` / `--format toon`)
 

@@ -41,7 +41,7 @@ const topLevelHelp = `Usage: git kura <command> <key> [flags]
 
 Commands:
   get   <key> [flags]  Print worktree path, branch, or structured metadata
-  open  <key>          Create a worktree for <key>
+  open  <key> [flags]  Create a worktree for <key>
   close <key>          Remove the worktree for <key>
 
 Run "git kura <command> --help" for command-specific help.`
@@ -49,6 +49,8 @@ Run "git kura <command> --help" for command-specific help.`
 const getHelp = `Usage: git kura get <key> [flags]
 
 Print worktree information for <key>.
+
+Scalar and structured output require the worktree to be open.
 
 Flags:
   --path          Print the worktree filesystem path (default)
@@ -58,9 +60,12 @@ Flags:
   --format json   Same as --json
   --format toon   Same as --toon`
 
-const openHelp = `Usage: git kura open <key>
+const openHelp = `Usage: git kura open <key> [flags]
 
-Create a git worktree for <key> on a new branch kura-<key>.`
+Create a git worktree for <key> on a new branch kura-<key>.
+
+Flags:
+  --dry-run       Print the worktree that would be created as JSON`
 
 const closeHelp = `Usage: git kura close <key>
 
@@ -99,11 +104,11 @@ func run(args []string) error {
 			fmt.Println(openHelp)
 			return nil
 		}
-		key, err := parseKeyOnlyArgs("open", args[1:])
+		key, opts, err := parseOpenArgs(args[1:])
 		if err != nil {
 			return err
 		}
-		return cmdOpen(key)
+		return cmdOpen(key, opts)
 
 	case "close":
 		if hasHelpFlag(args[1:]) {
@@ -144,6 +149,10 @@ const (
 
 type getOptions struct {
 	OutputMode outputMode
+}
+
+type openOptions struct {
+	DryRun bool
 }
 
 func parseGetArgs(args []string) (string, getOptions, error) {
@@ -212,6 +221,29 @@ func parseGetArgs(args []string) (string, getOptions, error) {
 	return key, getOptions{OutputMode: mode}, nil
 }
 
+func parseOpenArgs(args []string) (string, openOptions, error) {
+	if len(args) == 0 {
+		return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run]")
+	}
+
+	key := args[0]
+	if err := validateKey(key); err != nil {
+		return "", openOptions{}, err
+	}
+
+	var opts openOptions
+	for _, flag := range args[1:] {
+		switch flag {
+		case "--dry-run":
+			opts.DryRun = true
+		default:
+			return "", openOptions{}, fmt.Errorf("usage: git kura open <key> [--dry-run]: unexpected argument %q", flag)
+		}
+	}
+
+	return key, opts, nil
+}
+
 func parseKeyOnlyArgs(command string, args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: git kura %s <key>", command)
@@ -243,6 +275,17 @@ func cmdGet(key string, opts getOptions) error {
 		return fmt.Errorf("resolve worktree path: %w", err)
 	}
 
+	_, statErr := os.Stat(path)
+	exists := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return fmt.Errorf("check worktree path: %w", statErr)
+	}
+
+	meta, metaErr := readStructuredMetadata(repoRoot, key, path, exists)
+	if metaErr != nil {
+		return metaErr
+	}
+
 	if opts.OutputMode == outputPath {
 		fmt.Println(path)
 		return nil
@@ -252,27 +295,10 @@ func cmdGet(key string, opts getOptions) error {
 		return nil
 	}
 
-	// outputJSON and outputTOON require full worktree data.
-	_, statErr := os.Stat(path)
-	exists := statErr == nil
-
 	dirty := false
 	if exists {
 		if dirty, err = worktreeDirty(path); err != nil {
 			return fmt.Errorf("check worktree status: %w", err)
-		}
-	}
-
-	var base string
-	if exists {
-		meta, metaErr := readMetadata(repoRoot, key)
-		if metaErr != nil {
-			return fmt.Errorf("metadata for %q: %w", key, metaErr)
-		}
-		base = meta.BaseBranch
-	} else {
-		if base, err = headBranch(repoRoot); err != nil {
-			return fmt.Errorf("get base branch: %w", err)
 		}
 	}
 
@@ -283,19 +309,14 @@ func cmdGet(key string, opts getOptions) error {
 		Branch:         branch,
 		WorktreePath:   path,
 		RepositoryRoot: repoRoot,
-		BaseBranch:     base,
+		BaseBranch:     meta.BaseBranch,
 		Exists:         exists,
 		Dirty:          dirty,
 	}
 
 	switch opts.OutputMode {
 	case outputJSON:
-		out, _ := json.Marshal(data)
-		inst, _ := jsonschema.UnmarshalJSON(bytes.NewReader(out))
-		if err := outputSchema.Validate(inst); err != nil {
-			return fmt.Errorf("internal: json output does not conform to schema: %w", err)
-		}
-		fmt.Println(string(out))
+		return printJSON(data)
 	case outputTOON:
 		fmt.Printf(
 			"schemaVersion = %d\nkey = %s\nkind = %s\nbranch = %s\npath = %s\nworktreePath = %s\nrepositoryRoot = %s\nbaseBranch = %s\nexists = %v\ndirty = %v\n",
@@ -308,7 +329,7 @@ func cmdGet(key string, opts getOptions) error {
 	return nil
 }
 
-func cmdOpen(key string) error {
+func cmdOpen(key string, opts openOptions) error {
 	repoRoot, err := gitRepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
@@ -319,6 +340,25 @@ func cmdOpen(key string) error {
 		return fmt.Errorf("resolve worktree path: %w", err)
 	}
 	branch := branchName(key)
+
+	if opts.DryRun {
+		base, err := headBranch(repoRoot)
+		if err != nil {
+			return fmt.Errorf("get base branch: %w", err)
+		}
+		data := worktreeJSON{
+			SchemaVersion:  1,
+			Key:            key,
+			Kind:           "worktree",
+			Branch:         branch,
+			WorktreePath:   path,
+			RepositoryRoot: repoRoot,
+			BaseBranch:     base,
+			Exists:         false,
+			Dirty:          false,
+		}
+		return printJSON(data)
+	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create worktree parent: %w", err)
@@ -352,6 +392,16 @@ func cmdOpen(key string) error {
 	return nil
 }
 
+func printJSON(data worktreeJSON) error {
+	out, _ := json.Marshal(data)
+	inst, _ := jsonschema.UnmarshalJSON(bytes.NewReader(out))
+	if err := outputSchema.Validate(inst); err != nil {
+		return fmt.Errorf("internal: json output does not conform to schema: %w", err)
+	}
+	fmt.Println(string(out))
+	return nil
+}
+
 func cmdClose(key string) error {
 	repoRoot, err := gitRepoRoot()
 	if err != nil {
@@ -372,6 +422,10 @@ func cmdClose(key string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree remove: %w\n%s", err, out)
+	}
+
+	if err := deleteBranch(repoRoot, branchName(key)); err != nil {
+		return err
 	}
 
 	meta, err := metadataPath(repoRoot, key)
@@ -406,6 +460,34 @@ func readMetadata(repoRoot, key string) (metadataFile, error) {
 	return meta, nil
 }
 
+func readStructuredMetadata(repoRoot, key, worktreePath string, worktreeExists bool) (metadataFile, error) {
+	metaPath, err := metadataPath(repoRoot, key)
+	if err != nil {
+		return metadataFile{}, fmt.Errorf("resolve metadata path: %w", err)
+	}
+
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if worktreeExists {
+				return metadataFile{}, fmt.Errorf("metadata for key %q is missing; worktree exists at %s, but Kura cannot reconstruct creation-time metadata such as baseBranch", key, worktreePath)
+			}
+			return metadataFile{}, fmt.Errorf("worktree for key %q is not open; run \"git kura open %s\" first", key, key)
+		}
+		return metadataFile{}, fmt.Errorf("read metadata for key %q: %w", key, err)
+	}
+
+	var meta metadataFile
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return metadataFile{}, fmt.Errorf("metadata for key %q is invalid: %w", key, err)
+	}
+	if !worktreeExists {
+		return metadataFile{}, fmt.Errorf("worktree for key %q is missing; metadata exists at %s, but expected worktree at %s", key, metaPath, worktreePath)
+	}
+
+	return meta, nil
+}
+
 type worktreeJSON struct {
 	SchemaVersion  int    `json:"schemaVersion"`
 	Key            string `json:"key"`
@@ -437,6 +519,16 @@ func headBranch(repoRoot string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func deleteBranch(repoRoot, branch string) error {
+	cmd := exec.Command("git", "branch", "-d", branch)
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("delete branch %q: %w\n%s", branch, err, out)
+	}
+	return nil
 }
 
 func gitCommonDir(repoRoot string) (string, error) {

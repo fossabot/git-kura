@@ -12,28 +12,37 @@ Create the branch and worktree for the given key.
 
 ```sh
 git kura open 51
+git kura open 51 --dry-run
 ```
 
 If the corresponding branch or worktree already exists, Kura should not create a
 conflicting workspace.
+
+`--dry-run` does not create the branch, worktree, or metadata. It prints the
+planned worktree as JSON using the same schema as `git kura get <N> --json`.
 
 ## `git kura get <key>`
 
 Resolve the branch or worktree associated with the given key.
 
 ```sh
+git kura get 51
 git kura get 51 --path
 git kura get 51 --branch
 git kura get 51 --json
 git kura get 51 --toon
 ```
 
+`git kura get <key>` and all output flags require the key to be currently open.
+Use `git kura open <key> --dry-run` when you want to inspect the path and branch
+that would be created.
+
 This command is designed for both humans and scripts.
 
 For example:
 
 ```sh
-codex review "$(git kura get 51 --path)"
+codex review "$(git kura get 51)"
 ```
 
 See [output-format.md](output-format.md) for the full metadata schema and output
@@ -41,7 +50,7 @@ format reference.
 
 ## `git kura close <key>`
 
-Remove the worktree associated with the given key.
+Remove the worktree and Kura-managed branch associated with the given key.
 
 ```sh
 git kura close 51

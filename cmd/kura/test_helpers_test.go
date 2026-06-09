@@ -228,6 +228,13 @@ func requireEmptyStdout(t *testing.T, result cliResult) {
 	}
 }
 
+func requireEmptyStderr(t *testing.T, result cliResult) {
+	t.Helper()
+	if result.stderr != "" {
+		t.Fatalf("stderr = %q, want empty", result.stderr)
+	}
+}
+
 func requireStdoutLine(t *testing.T, result cliResult, want string) {
 	t.Helper()
 	requireExitCode(t, result, 0)

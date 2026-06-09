@@ -6,7 +6,8 @@ It maps issue, ticket, or task keys to deterministic Git worktrees for humans, A
 
 ```sh
 git kura open 51              # create a worktree for Issue #51
-git kura get 51               # print workspace metadata for Issue #51
+git kura open 51 --dry-run    # print the worktree that would be created
+git kura get 51               # print the open worktree path for Issue #51
 git kura get 51 --path        # print the worktree path for Issue #51
 git kura get 51 --branch      # print the branch name for Issue #51
 git kura get 51 --format json # print workspace metadata as JSON
@@ -50,10 +51,16 @@ Open a worktree for issue `51`:
 git kura open 51
 ```
 
+Preview the worktree that would be created:
+
+```sh
+git kura open 51 --dry-run
+```
+
 Resolve the worktree path:
 
 ```sh
-cd "$(git kura get 51 --path)"
+cd "$(git kura get 51)"
 ```
 
 Resolve the branch name:

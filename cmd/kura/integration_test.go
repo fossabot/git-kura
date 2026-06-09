@@ -19,8 +19,8 @@ func TestRepositoryContext(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "get succeeds in repository", args: []string{"get", "51", "--path"}},
 		{name: "open succeeds in repository", args: []string{"open", "51"}},
+		{name: "get succeeds in repository", args: []string{"get", "51", "--path"}},
 		{name: "close succeeds in repository", args: []string{"close", "51"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,6 +78,7 @@ func TestGetPathIsStateIndependentAndScriptFriendly(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	want := expectedWorktreePath(repo, "51")
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
 
 	for _, mutate := range []struct {
 		name string
@@ -104,6 +105,13 @@ func TestGetPathIsStateIndependentAndScriptFriendly(t *testing.T) {
 func TestGetPath(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+
+	missing := cli.gitKura(repo, "get", "51", "--path")
+	requireNonZeroExitCode(t, missing)
+	requireEmptyStdout(t, missing)
+	requireStderrContains(t, missing, "not open")
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
 	result := cli.gitKura(repo, "get", "51", "--path")
 	requireExitCode(t, result, 0)
 	requireStdoutLine(t, result, expectedWorktreePath(repo, "51"))
@@ -116,6 +124,30 @@ func TestGetPath(t *testing.T) {
 	outside := cli.gitKura(t.TempDir(), "get", "51", "--path")
 	requireNonZeroExitCode(t, outside)
 	requireEmptyStdout(t, outside)
+}
+
+func TestGetDefaultRequiresOpenWorktree(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	beforeOpen := cli.gitKura(repo, "get", "51")
+	requireNonZeroExitCode(t, beforeOpen)
+	requireEmptyStdout(t, beforeOpen)
+	requireStderrContains(t, beforeOpen, "not open")
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	requireStdoutLine(t, cli.gitKura(repo, "get", "51"), expectedWorktreePath(repo, "51"))
+
+	requireExitCode(t, cli.gitKura(repo, "close", "51"), 0)
+	afterClose := cli.gitKura(repo, "get", "51")
+	requireNonZeroExitCode(t, afterClose)
+	requireEmptyStdout(t, afterClose)
+	requireStderrContains(t, afterClose, "not open")
+
+	pathAfterClose := cli.gitKura(repo, "get", "51", "--path")
+	requireNonZeroExitCode(t, pathAfterClose)
+	requireEmptyStdout(t, pathAfterClose)
+	requireStderrContains(t, pathAfterClose, "not open")
 }
 
 func TestGetPathCommandSubstitutionPOSIX(t *testing.T) {
@@ -147,6 +179,13 @@ func TestGetPathCommandSubstitutionWindows(t *testing.T) {
 func TestGetBranch(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+
+	missing := cli.gitKura(repo, "get", "51", "--branch")
+	requireNonZeroExitCode(t, missing)
+	requireEmptyStdout(t, missing)
+	requireStderrContains(t, missing, "not open")
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
 	result := cli.gitKura(repo, "get", "51", "--branch")
 	requireExitCode(t, result, 0)
 	requireStdoutLine(t, result, "kura-51")
@@ -175,6 +214,18 @@ func TestCloseRemovesWorktreeAndMetadata(t *testing.T) {
 	assertPathMissing(t, metadataPath)
 }
 
+func TestCloseAllowsReopenWithSameKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	requireExitCode(t, cli.gitKura(repo, "close", "51"), 0)
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	assertPathExists(t, expectedWorktreePath(repo, "51"))
+	assertPathExists(t, expectedMetadataPath(repo, "51"))
+}
+
 func TestOpenCreatesMetadata(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
@@ -191,6 +242,35 @@ func TestOpenCreatesMetadata(t *testing.T) {
 	if metadata["worktreePath"] != expectedWorktreePath(repo, "51") {
 		t.Fatalf("metadata worktreePath = %v, want %s", metadata["worktreePath"], expectedWorktreePath(repo, "51"))
 	}
+}
+
+func TestOpenDryRunPrintsPlannedWorktree(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "open", "51", "--dry-run")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+	requireConformsToOutputSchema(t, result.stdout)
+
+	metadata := requireJSONMetadata(t, result.stdout)
+	if metadata["branch"] != "kura-51" {
+		t.Fatalf("dry-run branch = %v, want kura-51", metadata["branch"])
+	}
+	if metadata["worktreePath"] != expectedWorktreePath(repo, "51") {
+		t.Fatalf("dry-run worktreePath = %v, want %s", metadata["worktreePath"], expectedWorktreePath(repo, "51"))
+	}
+	if metadata["baseBranch"] != "main" {
+		t.Fatalf("dry-run baseBranch = %v, want main", metadata["baseBranch"])
+	}
+	if metadata["exists"] != false {
+		t.Fatalf("dry-run exists = %v, want false", metadata["exists"])
+	}
+	if metadata["dirty"] != false {
+		t.Fatalf("dry-run dirty = %v, want false", metadata["dirty"])
+	}
+	assertPathMissing(t, expectedWorktreePath(repo, "51"))
+	assertPathMissing(t, expectedMetadataPath(repo, "51"))
 }
 
 func TestOpenStoresWorktreeAndMetadataInGitCommonDir(t *testing.T) {
@@ -242,14 +322,59 @@ func TestGetStructuredOutputFailsWhenMetadataIsMissing(t *testing.T) {
 	requireNonZeroExitCode(t, jsonResult)
 	requireEmptyStdout(t, jsonResult)
 	requireStderrContains(t, jsonResult, "metadata")
+	requireStderrContains(t, jsonResult, "missing")
 
 	toonResult := cli.gitKura(repo, "get", "51", "--toon")
 	requireNonZeroExitCode(t, toonResult)
 	requireEmptyStdout(t, toonResult)
 	requireStderrContains(t, toonResult, "metadata")
+	requireStderrContains(t, toonResult, "missing")
 
-	requireStdoutLine(t, cli.gitKura(repo, "get", "51", "--path"), expectedWorktreePath(repo, "51"))
-	requireStdoutLine(t, cli.gitKura(repo, "get", "51", "--branch"), "kura-51")
+	pathResult := cli.gitKura(repo, "get", "51", "--path")
+	requireNonZeroExitCode(t, pathResult)
+	requireEmptyStdout(t, pathResult)
+	requireStderrContains(t, pathResult, "metadata")
+
+	branchResult := cli.gitKura(repo, "get", "51", "--branch")
+	requireNonZeroExitCode(t, branchResult)
+	requireEmptyStdout(t, branchResult)
+	requireStderrContains(t, branchResult, "metadata")
+}
+
+func TestGetStructuredOutputFailsWhenWorktreeIsMissing(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	if err := os.RemoveAll(expectedWorktreePath(repo, "51")); err != nil {
+		t.Fatal(err)
+	}
+
+	jsonResult := cli.gitKura(repo, "get", "51", "--json")
+	requireNonZeroExitCode(t, jsonResult)
+	requireEmptyStdout(t, jsonResult)
+	requireStderrContains(t, jsonResult, "worktree")
+	requireStderrContains(t, jsonResult, "missing")
+	requireStderrContains(t, jsonResult, "metadata exists")
+}
+
+func TestGetStructuredOutputFailsForUnopenedKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "1"), 0)
+
+	jsonResult := cli.gitKura(repo, "get", "2", "--json")
+	requireNonZeroExitCode(t, jsonResult)
+	requireEmptyStdout(t, jsonResult)
+	requireStderrContains(t, jsonResult, "not open")
+	requireStderrContains(t, jsonResult, "git kura open 2")
+
+	toonResult := cli.gitKura(repo, "get", "2", "--toon")
+	requireNonZeroExitCode(t, toonResult)
+	requireEmptyStdout(t, toonResult)
+	requireStderrContains(t, toonResult, "not open")
+	requireStderrContains(t, toonResult, "git kura open 2")
 }
 
 func TestGetTOONOutputContainsMetadataFields(t *testing.T) {
@@ -281,6 +406,7 @@ func TestGetJSONOutputConformsToSchema(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
 	result := cli.gitKura(repo, "get", "51", "--json")
 	requireExitCode(t, result, 0)
 

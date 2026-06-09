@@ -51,7 +51,7 @@ Then issue `51` maps to:
 /home/user/project/.git/kura/worktrees/51
 ```
 
-Kura keeps worktrees outside the repository root so commands such as `git clean -fdx` in the main repository do not remove them.
+Kura keeps worktrees outside the working tree so commands such as `git clean -fdx` in the main repository do not remove them. Git does not clean files under its own `.git` directory as working tree content.
 
 ## Metadata
 
