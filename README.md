@@ -25,16 +25,16 @@ git kura ls                     # list all open worktrees
 ## Walkthrough
 
 ```sh
-git kura open hoge-feature             # create a worktree and a branch in a repository
-cd $(git kura get hoge-feature)        # move to the worktree
+git kura open fizz-feature             # create a worktree and a branch in a repository
+cd $(git kura get fizz-feature)        # move to the worktree
 
 # edit, save and commit in the worktree
 
-cd $(git kura get hoge-feature --root) # move to the repository root
+cd $(git kura get fizz-feature --root) # move to the repository root
 
-git merge hoge-feature                 # merge changes to main stream
+git merge fizz-feature                 # merge changes to main stream
 
-git kura close hoge-feature            # clean up worktree and branch
+git kura close fizz-feature            # clean up worktree and branch
 ```
 
 ## Concept
