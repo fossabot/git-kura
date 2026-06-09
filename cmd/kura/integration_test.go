@@ -19,6 +19,7 @@ func TestRepositoryContext(t *testing.T) {
 		name string
 		args []string
 	}{
+		{name: "ls succeeds in repository", args: []string{"ls"}},
 		{name: "open succeeds in repository", args: []string{"open", "51"}},
 		{name: "get succeeds in repository", args: []string{"get", "51", "--path"}},
 		{name: "close succeeds in repository", args: []string{"close", "51"}},
@@ -39,6 +40,7 @@ func TestRepositoryContext(t *testing.T) {
 		{name: "get json fails outside repository", args: []string{"get", "51", "--json"}},
 		{name: "open fails outside repository", args: []string{"open", "51"}},
 		{name: "close fails outside repository", args: []string{"close", "51"}},
+		{name: "ls fails outside repository", args: []string{"ls"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := cli.gitKura(outside, tc.args...)
@@ -411,4 +413,42 @@ func TestGetJSONOutputConformsToSchema(t *testing.T) {
 	requireExitCode(t, result, 0)
 
 	requireConformsToOutputSchema(t, result.stdout)
+}
+
+func TestLsNoOpenWorktrees(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "ls")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+	requireEmptyStderr(t, result)
+}
+
+func TestLsListsOpenWorktrees(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	requireExitCode(t, cli.gitKura(repo, "open", "FEAT-1"), 0)
+
+	result := cli.gitKura(repo, "ls")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+	requireStdoutContainsLine(t, result, "51")
+	requireStdoutContainsLine(t, result, "FEAT-1")
+}
+
+func TestLsShowsOnlyOpenWorktrees(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	requireExitCode(t, cli.gitKura(repo, "open", "52"), 0)
+	requireExitCode(t, cli.gitKura(repo, "close", "51"), 0)
+
+	result := cli.gitKura(repo, "ls")
+	requireExitCode(t, result, 0)
+	requireStdoutContainsLine(t, result, "52")
+	requireStdoutNotContainsLine(t, result, "51")
 }

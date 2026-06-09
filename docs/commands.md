@@ -59,6 +59,25 @@ git kura close 51
 Kura should refuse to remove a worktree when doing so would discard uncommitted
 changes unless explicitly instructed.
 
+## `git kura ls`
+
+List all currently open worktrees managed by Kura.
+
+```sh
+git kura ls
+```
+
+Prints one key per line to standard output, sorted alphabetically. If no
+worktrees are currently open, the output is empty and the exit code is 0.
+
+This command is designed for scripts and enumeration:
+
+```sh
+for key in $(git kura ls); do
+  git kura get "$key" --toon
+done
+```
+
 ## Keys
 
 A key is an opaque, case-sensitive string identifier.

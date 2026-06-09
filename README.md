@@ -18,6 +18,7 @@ git kura get 51 --json        # alias of `--format json`
 git kura get 51 --format toon # print workspace metadata as TOON for AI prompts
 git kura get 51 --toon        # alias of `--format toon`
 git kura close 51             # remove the worktree for Issue #51
+git kura ls                   # list all open worktrees
 ```
 
 ## Concept

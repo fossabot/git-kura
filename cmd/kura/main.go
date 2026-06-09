@@ -37,12 +37,13 @@ func mustCompileOutputSchema() *jsonschema.Schema {
 
 // Entrypoint and dispatch
 
-const topLevelHelp = `Usage: git kura <command> <key> [flags]
+const topLevelHelp = `Usage: git kura <command> [key] [flags]
 
 Commands:
   get   <key> [flags]  Print worktree path, branch, or structured metadata
   open  <key> [flags]  Create a worktree for <key>
   close <key>          Remove the worktree for <key>
+  ls                   List all open worktrees
 
 Run "git kura <command> --help" for command-specific help.`
 
@@ -70,6 +71,10 @@ Flags:
 const closeHelp = `Usage: git kura close <key>
 
 Remove the git worktree for <key>.`
+
+const lsHelp = `Usage: git kura ls
+
+List all currently open worktrees, one key per line.`
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -120,6 +125,16 @@ func run(args []string) error {
 			return err
 		}
 		return cmdClose(key)
+
+	case "ls":
+		if hasHelpFlag(args[1:]) {
+			fmt.Println(lsHelp)
+			return nil
+		}
+		if err := parseLsArgs(args[1:]); err != nil {
+			return err
+		}
+		return cmdLs()
 
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -399,6 +414,46 @@ func printJSON(data worktreeJSON) error {
 		return fmt.Errorf("internal: json output does not conform to schema: %w", err)
 	}
 	fmt.Println(string(out))
+	return nil
+}
+
+func parseLsArgs(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("usage: git kura ls: unexpected argument %q", args[0])
+	}
+	return nil
+}
+
+func cmdLs() error {
+	repoRoot, err := gitRepoRoot()
+	if err != nil {
+		return fmt.Errorf("not inside a git repository")
+	}
+
+	dir, err := stateDir(repoRoot)
+	if err != nil {
+		return fmt.Errorf("resolve state dir: %w", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, "meta", "worktrees"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read metadata dir: %w", err)
+	}
+
+	// os.ReadDir returns entries sorted by name
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		fmt.Println(strings.TrimSuffix(name, ".json"))
+	}
 	return nil
 }
 

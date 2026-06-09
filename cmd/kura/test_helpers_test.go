@@ -300,6 +300,25 @@ func requireJSONFile(t *testing.T, path string) map[string]any {
 	return requireJSONMetadata(t, string(data))
 }
 
+func requireStdoutContainsLine(t *testing.T, result cliResult, want string) {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimRight(result.stdout, "\n"), "\n") {
+		if line == want {
+			return
+		}
+	}
+	t.Fatalf("stdout = %q, want a line %q\nstderr:\n%s", result.stdout, want, result.stderr)
+}
+
+func requireStdoutNotContainsLine(t *testing.T, result cliResult, notWant string) {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimRight(result.stdout, "\n"), "\n") {
+		if line == notWant {
+			t.Fatalf("stdout = %q, want no line %q", result.stdout, notWant)
+		}
+	}
+}
+
 func requireConformsToOutputSchema(t *testing.T, jsonOutput string) {
 	t.Helper()
 
