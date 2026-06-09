@@ -262,6 +262,9 @@ func TestOpenCreatesMetadata(t *testing.T) {
 	assertPathExists(t, metadataPath)
 
 	metadata := requireJSONFile(t, metadataPath)
+	if metadata["repositoryRoot"] != repo {
+		t.Fatalf("metadata repositoryRoot = %v, want %s", metadata["repositoryRoot"], repo)
+	}
 	if metadata["baseBranch"] != "main" {
 		t.Fatalf("metadata baseBranch = %v, want main", metadata["baseBranch"])
 	}

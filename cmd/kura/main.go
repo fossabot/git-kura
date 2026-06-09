@@ -318,7 +318,7 @@ func cmdGet(key string, opts getOptions) error {
 		return nil
 	}
 	if opts.OutputMode == outputRoot {
-		fmt.Println(repoRoot)
+		fmt.Println(meta.RepositoryRoot)
 		return nil
 	}
 
@@ -335,7 +335,7 @@ func cmdGet(key string, opts getOptions) error {
 		Kind:           "worktree",
 		Branch:         branch,
 		WorktreePath:   path,
-		RepositoryRoot: repoRoot,
+		RepositoryRoot: meta.RepositoryRoot,
 		BaseBranch:     meta.BaseBranch,
 		Exists:         exists,
 		Dirty:          dirty,
@@ -398,7 +398,7 @@ func cmdOpen(key string, opts openOptions) error {
 		return fmt.Errorf("get base branch: %w", err)
 	}
 
-	meta := metadataFile{BaseBranch: base, WorktreePath: path}
+	meta := metadataFile{RepositoryRoot: repoRoot, BaseBranch: base, WorktreePath: path}
 	metaPath, err := metadataPath(repoRoot, key)
 	if err != nil {
 		return fmt.Errorf("resolve metadata path: %w", err)
@@ -512,8 +512,9 @@ func cmdClose(key string) error {
 }
 
 type metadataFile struct {
-	BaseBranch   string `json:"baseBranch"`
-	WorktreePath string `json:"worktreePath"`
+	RepositoryRoot string `json:"repositoryRoot"`
+	BaseBranch     string `json:"baseBranch"`
+	WorktreePath   string `json:"worktreePath"`
 }
 
 func readMetadata(repoRoot, key string) (metadataFile, error) {

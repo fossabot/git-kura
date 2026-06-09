@@ -364,14 +364,14 @@ func TestReadMetadata(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, path, `{"baseBranch":"main","worktreePath":"/tmp/worktree"}`)
+	writeFile(t, path, `{"repositoryRoot":"/repo","baseBranch":"main","worktreePath":"/tmp/worktree"}`)
 
 	meta, err := readMetadata(repo, "51")
 	if err != nil {
 		t.Fatalf("readMetadata error = %v", err)
 	}
-	if meta.BaseBranch != "main" || meta.WorktreePath != "/tmp/worktree" {
-		t.Fatalf("metadata = %+v, want main and /tmp/worktree", meta)
+	if meta.RepositoryRoot != "/repo" || meta.BaseBranch != "main" || meta.WorktreePath != "/tmp/worktree" {
+		t.Fatalf("metadata = %+v, want repositoryRoot /repo, baseBranch main, worktreePath /tmp/worktree", meta)
 	}
 
 	writeFile(t, path, `{`)
@@ -414,13 +414,13 @@ func TestReadStructuredMetadata(t *testing.T) {
 		t.Fatalf("error = %q, want it to mention invalid", err.Error())
 	}
 
-	writeFile(t, metadata, `{"baseBranch":"main","worktreePath":"`+worktree+`"}`)
+	writeFile(t, metadata, `{"repositoryRoot":"`+repo+`","baseBranch":"main","worktreePath":"`+worktree+`"}`)
 	meta, err := readStructuredMetadata(repo, "51", worktree, true)
 	if err != nil {
 		t.Fatalf("readStructuredMetadata error = %v", err)
 	}
-	if meta.BaseBranch != "main" || meta.WorktreePath != worktree {
-		t.Fatalf("metadata = %+v, want main and %s", meta, worktree)
+	if meta.RepositoryRoot != repo || meta.BaseBranch != "main" || meta.WorktreePath != worktree {
+		t.Fatalf("metadata = %+v, want repositoryRoot %s, baseBranch main, worktreePath %s", meta, repo, worktree)
 	}
 
 	if _, err := readStructuredMetadata(repo, "51", worktree, false); err == nil {
