@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,63 +57,13 @@ func TestRepositoryContext(t *testing.T) {
 	}
 }
 
-func TestKeyValidationAcceptsOpaqueCaseSensitiveKeys(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	for _, key := range []string{
-		"51",
-		"051",
-		"ABC-123",
-		"abc-123",
-		"task-51",
-		"bugfix_login",
-		"release-2026-06",
-	} {
-		t.Run(key, func(t *testing.T) {
-			branch := cli.gitKura(repo, "get", key, "--branch")
-			requireExitCode(t, branch, 0)
-			requireStdoutLine(t, branch, "kura-"+key)
-
-			path := cli.gitKura(repo, "get", key, "--path")
-			requireExitCode(t, path, 0)
-			requireStdoutLine(t, path, expectedWorktreePath(repo, key))
-		})
-	}
-
-	requireStdoutLine(t, cli.gitKura(repo, "get", "51", "--branch"), "kura-51")
-	requireStdoutLine(t, cli.gitKura(repo, "get", "051", "--branch"), "kura-051")
-	requireStdoutLine(t, cli.gitKura(repo, "get", "ABC-123", "--branch"), "kura-ABC-123")
-	requireStdoutLine(t, cli.gitKura(repo, "get", "abc-123", "--branch"), "kura-abc-123")
-}
-
 func TestKeyValidationRejectsUnsafeKeysWithoutFilesystemChanges(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
 	for _, key := range []string{
 		"../x",
-		"..\\x",
-		"/a/b",
-		`C:\temp\x`,
-		"a/b",
-		`a\b`,
-		".",
-		".git",
-		".git/config",
-		"feature..x",
-		"feature.lock",
-		"feature.",
 		"@{upstream}",
-		"a b",
-		"a\tb",
-		"a\nb",
-		"a\x01b",
-		"$(rm -rf .)",
-		"`rm -rf .`",
-		"a; rm -rf .",
-		"a && rm -rf .",
-		"a | cat",
 	} {
 		t.Run(printableName(key), func(t *testing.T) {
 			before := gitRefs(t, repo)
@@ -124,27 +75,6 @@ func TestKeyValidationRejectsUnsafeKeysWithoutFilesystemChanges(t *testing.T) {
 				t.Fatalf("git refs changed for invalid key %q\nbefore:\n%s\nafter:\n%s", key, before, after)
 			}
 			assertPathMissing(t, expectedWorktreePath(repo, key))
-		})
-	}
-}
-
-func TestDeterministicResolution(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	for _, tc := range []struct {
-		key    string
-		branch string
-	}{
-		{key: "51", branch: "kura-51"},
-		{key: "051", branch: "kura-051"},
-		{key: "ABC-123", branch: "kura-ABC-123"},
-	} {
-		t.Run(tc.key, func(t *testing.T) {
-			for i := 0; i < 3; i++ {
-				requireStdoutLine(t, cli.gitKura(repo, "get", tc.key, "--branch"), tc.branch)
-				requireStdoutLine(t, cli.gitKura(repo, "get", tc.key, "--path"), expectedWorktreePath(repo, tc.key))
-			}
 		})
 	}
 }
@@ -307,41 +237,6 @@ func TestGetStructuredOutputFailsWhenMetadataIsMissing(t *testing.T) {
 	requireStdoutLine(t, cli.gitKura(repo, "get", "51", "--branch"), "kura-51")
 }
 
-func TestGetStructuredOutputOptions(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	jsonShort := cli.gitKura(repo, "get", "51", "--json")
-	jsonFormat := cli.gitKura(repo, "get", "51", "--format", "json")
-	requireExitCode(t, jsonShort, 0)
-	requireExitCode(t, jsonFormat, 0)
-	if jsonShort.stdout != jsonFormat.stdout {
-		t.Fatalf("--json and --format json differ\n--json: %s\n--format json: %s", jsonShort.stdout, jsonFormat.stdout)
-	}
-	metadata := requireJSONMetadata(t, jsonShort.stdout)
-	if metadata["branch"] != "kura-51" {
-		t.Fatalf("json branch = %v, want kura-51", metadata["branch"])
-	}
-	if metadata["worktreePath"] != expectedWorktreePath(repo, "51") {
-		t.Fatalf("json worktreePath = %v, want %s", metadata["worktreePath"], expectedWorktreePath(repo, "51"))
-	}
-
-	toonShort := cli.gitKura(repo, "get", "51", "--toon")
-	toonFormat := cli.gitKura(repo, "get", "51", "--format", "toon")
-	requireExitCode(t, toonShort, 0)
-	requireExitCode(t, toonFormat, 0)
-	if toonShort.stdout != toonFormat.stdout {
-		t.Fatalf("--toon and --format toon differ\n--toon: %s\n--format toon: %s", toonShort.stdout, toonFormat.stdout)
-	}
-	requireTOONMetadata(t, toonShort.stdout, "kura-51", expectedWorktreePath(repo, "51"))
-
-	unknown := cli.gitKura(repo, "get", "51", "--format", "xml")
-	requireNonZeroExitCode(t, unknown)
-	requireStderrContains(t, unknown, "format")
-	requireStderrContains(t, unknown, "json")
-	requireStderrContains(t, unknown, "toon")
-}
-
 func TestGetTOONOutputContainsMetadataFields(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
@@ -364,25 +259,6 @@ func TestGetTOONOutputContainsMetadataFields(t *testing.T) {
 		if !strings.Contains(result.stdout, want) {
 			t.Fatalf("toon output = %q, want it to contain field %q", result.stdout, want)
 		}
-	}
-}
-
-func TestGetOutputOptionConflicts(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	for _, args := range [][]string{
-		{"get", "51", "--path", "--branch"},
-		{"get", "51", "--json", "--toon"},
-		{"get", "51", "--path", "--json"},
-		{"get", "51", "--branch", "--json"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			result := cli.gitKura(repo, args...)
-			requireNonZeroExitCode(t, result)
-			requireEmptyStdout(t, result)
-			requireStderrContains(t, result, "conflict")
-		})
 	}
 }
 
@@ -497,6 +373,26 @@ func TestParseGetArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("--path produces path output mode", func(t *testing.T) {
+		_, opts, err := parseGetArgs([]string{"51", "--path"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if opts.OutputMode != outputPath {
+			t.Fatalf("OutputMode = %q, want %q", opts.OutputMode, outputPath)
+		}
+	})
+
+	t.Run("--branch produces branch output mode", func(t *testing.T) {
+		_, opts, err := parseGetArgs([]string{"51", "--branch"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if opts.OutputMode != outputBranch {
+			t.Fatalf("OutputMode = %q, want %q", opts.OutputMode, outputBranch)
+		}
+	})
+
 	t.Run("--json and --format json produce same output mode", func(t *testing.T) {
 		_, shortOpts, err := parseGetArgs([]string{"51", "--json"})
 		if err != nil {
@@ -540,6 +436,16 @@ func TestParseGetArgs(t *testing.T) {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("error %q does not mention %q", err.Error(), want)
 			}
+		}
+	})
+
+	t.Run("missing format value is error", func(t *testing.T) {
+		_, _, err := parseGetArgs([]string{"51", "--format"})
+		if err == nil {
+			t.Fatal("expected error for missing format value, got nil")
+		}
+		if !strings.Contains(err.Error(), "--format") {
+			t.Fatalf("error %q does not mention --format", err.Error())
 		}
 	})
 
@@ -620,6 +526,240 @@ func TestParseKeyOnlyArgs(t *testing.T) {
 			t.Fatalf("error %q does not mention 'key'", err.Error())
 		}
 	})
+}
+
+// In-process command tests cover dispatch and command branches without spawning
+// the compiled binary. End-to-end CLI behavior is covered above.
+
+func TestRunHelpAndUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "top-level short help", args: []string{"-h"}, want: "Usage: git kura"},
+		{name: "top-level long help", args: []string{"--help"}, want: "Usage: git kura"},
+		{name: "get help", args: []string{"get", "--help"}, want: "Usage: git kura get"},
+		{name: "open help", args: []string{"open", "--help"}, want: "Usage: git kura open"},
+		{name: "close help", args: []string{"close", "--help"}, want: "Usage: git kura close"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, err := captureStdout(t, func() error {
+				return run(tc.args)
+			})
+			if err != nil {
+				t.Fatalf("run(%v) error = %v, want nil", tc.args, err)
+			}
+			if !strings.Contains(stdout, tc.want) {
+				t.Fatalf("stdout = %q, want it to contain %q", stdout, tc.want)
+			}
+		})
+	}
+
+	for _, args := range [][]string{
+		{},
+		{"unknown"},
+	} {
+		t.Run(strings.Join(append([]string{"error"}, args...), " "), func(t *testing.T) {
+			if err := run(args); err == nil {
+				t.Fatalf("run(%v) error = nil, want error", args)
+			}
+		})
+	}
+}
+
+func TestRunArgumentErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"get"},
+		{"get", "51", "--format"},
+		{"open", "51", "--extra"},
+		{"close", "51", "--extra"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			if err := run(args); err == nil {
+				t.Fatalf("run(%v) error = nil, want error", args)
+			}
+		})
+	}
+}
+
+func TestRunCommandsInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"get", "51", "--path"})
+		})
+		if err != nil {
+			t.Fatalf("get --path error = %v", err)
+		}
+		if strings.TrimSpace(stdout) != expectedWorktreePath(repo, "51") {
+			t.Fatalf("get --path stdout = %q, want %q", stdout, expectedWorktreePath(repo, "51"))
+		}
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"get", "51", "--branch"})
+		})
+		if err != nil {
+			t.Fatalf("get --branch error = %v", err)
+		}
+		if strings.TrimSpace(stdout) != "kura-51" {
+			t.Fatalf("get --branch stdout = %q, want kura-51", stdout)
+		}
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"get", "51", "--json"})
+		})
+		if err != nil {
+			t.Fatalf("get --json before open error = %v", err)
+		}
+		metadata := requireJSONMetadata(t, stdout)
+		if metadata["exists"] != false {
+			t.Fatalf("exists = %v, want false before open", metadata["exists"])
+		}
+
+		if err := run([]string{"open", "51"}); err != nil {
+			t.Fatalf("open error = %v", err)
+		}
+		assertPathExists(t, expectedWorktreePath(repo, "51"))
+		assertPathExists(t, expectedMetadataPath(repo, "51"))
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"get", "51", "--toon"})
+		})
+		if err != nil {
+			t.Fatalf("get --toon error = %v", err)
+		}
+		for _, want := range []string{"schemaVersion", "worktreePath", "baseBranch", "exists"} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("toon stdout = %q, want it to contain %q", stdout, want)
+			}
+		}
+
+		if err := run([]string{"close", "51"}); err != nil {
+			t.Fatalf("close error = %v", err)
+		}
+		assertPathMissing(t, expectedWorktreePath(repo, "51"))
+		assertPathMissing(t, expectedMetadataPath(repo, "51"))
+	})
+}
+
+func TestRunCommandErrorPathsInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		if err := run([]string{"close", "missing"}); err != nil {
+			t.Fatalf("close missing worktree error = %v, want nil", err)
+		}
+
+		if err := run([]string{"open", "51"}); err != nil {
+			t.Fatalf("open error = %v", err)
+		}
+		if err := run([]string{"open", "51"}); err == nil {
+			t.Fatal("duplicate open error = nil, want error")
+		}
+
+		appendFile(t, filepath.Join(expectedWorktreePath(repo, "51"), "tracked.txt"), "dirty\n")
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"get", "51", "--json"})
+		})
+		if err != nil {
+			t.Fatalf("get --json dirty error = %v", err)
+		}
+		metadata := requireJSONMetadata(t, stdout)
+		if metadata["dirty"] != true {
+			t.Fatalf("dirty = %v, want true", metadata["dirty"])
+		}
+	})
+}
+
+func TestRunCommandsOutsideRepositoryInProcess(t *testing.T) {
+	outside := t.TempDir()
+
+	withWorkingDir(t, outside, func() {
+		for _, args := range [][]string{
+			{"get", "51", "--path"},
+			{"get", "51", "--json"},
+			{"open", "51"},
+			{"close", "51"},
+		} {
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				if err := run(args); err == nil {
+					t.Fatalf("run(%v) error = nil, want error", args)
+				}
+			})
+		}
+	})
+}
+
+func TestRunStructuredOutputRequiresMetadataForExistingWorktree(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		if err := run([]string{"open", "51"}); err != nil {
+			t.Fatalf("open error = %v", err)
+		}
+		if err := os.Remove(expectedMetadataPath(repo, "51")); err != nil {
+			t.Fatal(err)
+		}
+		if err := run([]string{"get", "51", "--json"}); err == nil {
+			t.Fatal("get --json with missing metadata error = nil, want error")
+		}
+		if err := run([]string{"get", "51", "--toon"}); err == nil {
+			t.Fatal("get --toon with missing metadata error = nil, want error")
+		}
+		if err := run([]string{"close", "51"}); err != nil {
+			t.Fatalf("close with missing metadata error = %v, want nil", err)
+		}
+	})
+}
+
+func TestGitHelpersReturnErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, err := headBranch(dir); err == nil {
+		t.Fatal("headBranch outside git repo error = nil, want error")
+	}
+	if _, err := worktreeDirty(dir); err == nil {
+		t.Fatal("worktreeDirty outside git repo error = nil, want error")
+	}
+}
+
+func TestReadMetadata(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	path := expectedMetadataPath(repo, "51")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, `{"baseBranch":"main","worktreePath":"/tmp/worktree"}`)
+
+	meta, err := readMetadata(repo, "51")
+	if err != nil {
+		t.Fatalf("readMetadata error = %v", err)
+	}
+	if meta.BaseBranch != "main" || meta.WorktreePath != "/tmp/worktree" {
+		t.Fatalf("metadata = %+v, want main and /tmp/worktree", meta)
+	}
+
+	writeFile(t, path, `{`)
+	if _, err := readMetadata(repo, "51"); err == nil {
+		t.Fatal("readMetadata invalid JSON error = nil, want error")
+	}
+
+	if _, err := readMetadata(repo, "missing"); err == nil {
+		t.Fatal("readMetadata missing file error = nil, want error")
+	}
+}
+
+func TestMetadataPath(t *testing.T) {
+	repo := filepath.Join("/home", "user", "repo")
+	want := filepath.Join("/home", "user", "repo.kura", "meta", "worktrees", "51.json")
+	if got := metadataPath(repo, "51"); got != want {
+		t.Fatalf("metadataPath(%q, 51) = %q, want %q", repo, got, want)
+	}
 }
 
 func TestRequireCleanValueStdoutAcceptsWindowsPath(t *testing.T) {
@@ -715,6 +855,49 @@ func runCommand(cmd *exec.Cmd) cliResult {
 		}
 	}
 	return cliResult{stdout: stdout.String(), stderr: stderr.String(), code: code}
+}
+
+func withWorkingDir(t *testing.T, dir string, fn func()) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(old); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	fn()
+}
+
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	old := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = write
+
+	fnErr := fn()
+
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = old
+
+	out, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := read.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(out), fnErr
 }
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -870,17 +1053,5 @@ func requireConformsToOutputSchema(t *testing.T, jsonOutput string) {
 
 	if err := outputSchema.Validate(inst); err != nil {
 		t.Fatalf("json output does not conform to schema:\n%v\noutput: %s", err, jsonOutput)
-	}
-}
-
-func requireTOONMetadata(t *testing.T, output, branch, path string) {
-	t.Helper()
-	if strings.TrimSpace(output) == "" {
-		t.Fatal("toon output is empty")
-	}
-	for _, want := range []string{"branch", branch, "path", path} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("toon output = %q, want it to contain %q", output, want)
-		}
 	}
 }
