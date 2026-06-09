@@ -3,9 +3,11 @@
 [![CI](https://github.com/tooppoo/git-kura/actions/workflows/ci.yml/badge.svg)](https://github.com/tooppoo/git-kura/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/tooppoo/git-kura/graph/badge.svg?token=5f8XJ77qiN)](https://codecov.io/gh/tooppoo/git-kura)
 
-git-kura is a keyed worktree resolver for Git.
+`git-kura` is a keyed worktree resolver for Git.
 
 It maps issue, ticket, task or feature keys to deterministic Git worktrees for humans, AI coding agents, and reviewers.
+
+`git-kura` provides following commands.
 
 ```sh
 git kura open fizz              # create a worktree and branch for key "fizz"
