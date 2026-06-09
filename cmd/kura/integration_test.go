@@ -193,6 +193,26 @@ func TestOpenCreatesMetadata(t *testing.T) {
 	}
 }
 
+func TestOpenStoresWorktreeAndMetadataInGitCommonDir(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+
+	wantStateDir := filepath.Join(repo, ".git", "kura")
+	wantWorktreePath := filepath.Join(wantStateDir, "worktrees", "51")
+	wantMetadataPath := filepath.Join(wantStateDir, "meta", "worktrees", "51.json")
+
+	assertPathExists(t, wantWorktreePath)
+	assertPathExists(t, wantMetadataPath)
+	requireStdoutLine(t, cli.gitKura(repo, "get", "51", "--path"), wantWorktreePath)
+
+	metadata := requireJSONFile(t, wantMetadataPath)
+	if metadata["worktreePath"] != wantWorktreePath {
+		t.Fatalf("metadata worktreePath = %v, want %s", metadata["worktreePath"], wantWorktreePath)
+	}
+}
+
 func TestGetStructuredOutputUsesOpenTimeBaseBranch(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)

@@ -238,7 +238,10 @@ func cmdGet(key string, opts getOptions) error {
 	}
 
 	branch := branchName(key)
-	path := worktreePath(repoRoot, key)
+	path, err := worktreePath(repoRoot, key)
+	if err != nil {
+		return fmt.Errorf("resolve worktree path: %w", err)
+	}
 
 	if opts.OutputMode == outputPath {
 		fmt.Println(path)
@@ -311,7 +314,10 @@ func cmdOpen(key string) error {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	path := worktreePath(repoRoot, key)
+	path, err := worktreePath(repoRoot, key)
+	if err != nil {
+		return fmt.Errorf("resolve worktree path: %w", err)
+	}
 	branch := branchName(key)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -331,7 +337,10 @@ func cmdOpen(key string) error {
 	}
 
 	meta := metadataFile{BaseBranch: base, WorktreePath: path}
-	metaPath := metadataPath(repoRoot, key)
+	metaPath, err := metadataPath(repoRoot, key)
+	if err != nil {
+		return fmt.Errorf("resolve metadata path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
 		return fmt.Errorf("create metadata dir: %w", err)
 	}
@@ -349,7 +358,10 @@ func cmdClose(key string) error {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	path := worktreePath(repoRoot, key)
+	path, err := worktreePath(repoRoot, key)
+	if err != nil {
+		return fmt.Errorf("resolve worktree path: %w", err)
+	}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
@@ -362,7 +374,10 @@ func cmdClose(key string) error {
 		return fmt.Errorf("git worktree remove: %w\n%s", err, out)
 	}
 
-	meta := metadataPath(repoRoot, key)
+	meta, err := metadataPath(repoRoot, key)
+	if err != nil {
+		return fmt.Errorf("resolve metadata path: %w", err)
+	}
 	if err := os.Remove(meta); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove metadata: %w", err)
 	}
@@ -376,7 +391,11 @@ type metadataFile struct {
 }
 
 func readMetadata(repoRoot, key string) (metadataFile, error) {
-	data, err := os.ReadFile(metadataPath(repoRoot, key))
+	path, err := metadataPath(repoRoot, key)
+	if err != nil {
+		return metadataFile{}, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return metadataFile{}, err
 	}
@@ -420,6 +439,21 @@ func headBranch(repoRoot string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func gitCommonDir(repoRoot string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	dir := strings.TrimSpace(string(out))
+	if filepath.IsAbs(dir) {
+		return filepath.Clean(dir), nil
+	}
+	return filepath.Clean(filepath.Join(repoRoot, dir)), nil
+}
+
 func worktreeDirty(path string) (bool, error) {
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = path
@@ -430,16 +464,36 @@ func worktreeDirty(path string) (bool, error) {
 	return len(strings.TrimSpace(string(out))) > 0, nil
 }
 
-func stateDir(repoRoot string) string {
-	return filepath.Join(filepath.Dir(repoRoot), filepath.Base(repoRoot)+".kura")
+func stateDir(repoRoot string) (string, error) {
+	commonDir, err := gitCommonDir(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(commonDir, "kura"), nil
 }
 
-func worktreePath(repoRoot, key string) string {
-	return filepath.Join(stateDir(repoRoot), "worktrees", key)
+func worktreePath(repoRoot, key string) (string, error) {
+	dir, err := stateDir(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	return worktreePathInStateDir(dir, key), nil
 }
 
-func metadataPath(repoRoot, key string) string {
-	return filepath.Join(stateDir(repoRoot), "meta", "worktrees", key+".json")
+func metadataPath(repoRoot, key string) (string, error) {
+	dir, err := stateDir(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	return metadataPathInStateDir(dir, key), nil
+}
+
+func worktreePathInStateDir(stateDir, key string) string {
+	return filepath.Join(stateDir, "worktrees", key)
+}
+
+func metadataPathInStateDir(stateDir, key string) string {
+	return filepath.Join(stateDir, "meta", "worktrees", key+".json")
 }
 
 func branchName(key string) string {

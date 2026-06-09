@@ -1,6 +1,6 @@
 # Store Kura State Outside the Repository Root
 
-- Status: Accepted
+- Status: Superseded by [20260609T120000Z_store-kura-state-in-git-common-dir.md](20260609T120000Z_store-kura-state-in-git-common-dir.md)
 - Created: 2026-06-09T01:27:12Z
 
 ## Context

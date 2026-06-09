@@ -1,23 +1,23 @@
 # State Management
 
-Kura manages local worktrees and metadata outside the repository root.
+Kura manages local worktrees and metadata under Git's common directory.
 
-For a repository at:
+For a repository whose Git common directory is:
 
 ```txt
-<repo-parent>/<repo>
+<git-common-dir>
 ```
 
 Kura stores its local state under:
 
 ```txt
-<repo-parent>/<repo>.kura/
+<git-common-dir>/kura/
 ```
 
 The directory layout is:
 
 ```txt
-<repo-parent>/<repo>.kura/
+<git-common-dir>/kura/
   worktrees/
     <key>/
   meta/
@@ -30,7 +30,7 @@ The directory layout is:
 Each key maps to a deterministic worktree path:
 
 ```txt
-<repo-parent>/<repo>.kura/worktrees/<key>
+<git-common-dir>/kura/worktrees/<key>
 ```
 
 For example, if the repository is:
@@ -39,10 +39,16 @@ For example, if the repository is:
 /home/user/project
 ```
 
+And its Git common directory is:
+
+```txt
+/home/user/project/.git
+```
+
 Then issue `51` maps to:
 
 ```txt
-/home/user/project.kura/worktrees/51
+/home/user/project/.git/kura/worktrees/51
 ```
 
 Kura keeps worktrees outside the repository root so commands such as `git clean -fdx` in the main repository do not remove them.
@@ -52,7 +58,7 @@ Kura keeps worktrees outside the repository root so commands such as `git clean 
 Each key also has a metadata file:
 
 ```txt
-<repo-parent>/<repo>.kura/meta/worktrees/<key>.json
+<git-common-dir>/kura/meta/worktrees/<key>.json
 ```
 
 The metadata file is created by `git kura open <key>`. It records creation-time state that cannot always be reconstructed later, such as the base branch used when the worktree was opened.
@@ -76,10 +82,10 @@ These values can be computed from the repository root and key even if stored met
 
 ## Cleanup
 
-All Kura-managed local state for a repository lives under one sibling directory:
+All Kura-managed local state for a repository lives under one directory:
 
 ```txt
-<repo-parent>/<repo>.kura/
+<git-common-dir>/kura/
 ```
 
 Removing that directory removes Kura-managed worktrees and metadata for that repository.
@@ -90,4 +96,4 @@ Do not remove only `meta/` unless you intentionally want to discard Kura metadat
 
 Kura does not store state in `<repo>/.git-kura/` because ignored files inside the repository root can be removed by `git clean -fdx`.
 
-Kura also avoids generic sibling names such as `<repo>.worktrees/` because they may collide with other tools or local conventions. The `<repo>.kura/` directory clearly marks the state as Kura-owned and keeps cleanup simple.
+Kura also avoids sibling directories such as `<repo>.kura/` because some development environments, including devcontainers, allow writes inside the repository but not to the repository parent directory. Git's common directory survives `git clean`, is local to the repository, and is writable in those environments.

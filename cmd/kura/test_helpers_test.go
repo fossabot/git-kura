@@ -190,7 +190,7 @@ func expectedMetadataPath(repo, key string) string {
 }
 
 func expectedStateDir(repo string) string {
-	return filepath.Join(filepath.Dir(repo), filepath.Base(repo)+".kura")
+	return filepath.Join(repo, ".git", "kura")
 }
 
 func printableName(value string) string {

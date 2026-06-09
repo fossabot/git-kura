@@ -71,24 +71,24 @@ func TestBranchName(t *testing.T) {
 
 func TestWorktreePath(t *testing.T) {
 	for _, tc := range []struct {
-		repoRoot string
+		stateDir string
 		key      string
 		want     string
 	}{
 		{
-			repoRoot: filepath.Join("/home", "user", "repo"),
+			stateDir: filepath.Join("/home", "user", "repo", ".git", "kura"),
 			key:      "51",
-			want:     filepath.Join("/home", "user", "repo.kura", "worktrees", "51"),
+			want:     filepath.Join("/home", "user", "repo", ".git", "kura", "worktrees", "51"),
 		},
 		{
-			repoRoot: filepath.Join("/home", "user", "myproject"),
+			stateDir: filepath.Join("/home", "user", "myproject", ".git", "kura"),
 			key:      "feature",
-			want:     filepath.Join("/home", "user", "myproject.kura", "worktrees", "feature"),
+			want:     filepath.Join("/home", "user", "myproject", ".git", "kura", "worktrees", "feature"),
 		},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
-			if got := worktreePath(tc.repoRoot, tc.key); got != tc.want {
-				t.Fatalf("worktreePath(%q, %q) = %q, want %q", tc.repoRoot, tc.key, got, tc.want)
+			if got := worktreePathInStateDir(tc.stateDir, tc.key); got != tc.want {
+				t.Fatalf("worktreePathInStateDir(%q, %q) = %q, want %q", tc.stateDir, tc.key, got, tc.want)
 			}
 		})
 	}
@@ -275,7 +275,7 @@ func TestGitHelpersReturnErrors(t *testing.T) {
 }
 
 func TestReadMetadata(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo")
+	repo := initUnitRepo(t)
 	path := expectedMetadataPath(repo, "51")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -301,11 +301,22 @@ func TestReadMetadata(t *testing.T) {
 }
 
 func TestMetadataPath(t *testing.T) {
-	repo := filepath.Join("/home", "user", "repo")
-	want := filepath.Join("/home", "user", "repo.kura", "meta", "worktrees", "51.json")
-	if got := metadataPath(repo, "51"); got != want {
-		t.Fatalf("metadataPath(%q, 51) = %q, want %q", repo, got, want)
+	stateDir := filepath.Join("/home", "user", "repo", ".git", "kura")
+	want := filepath.Join("/home", "user", "repo", ".git", "kura", "meta", "worktrees", "51.json")
+	if got := metadataPathInStateDir(stateDir, "51"); got != want {
+		t.Fatalf("metadataPathInStateDir(%q, 51) = %q, want %q", stateDir, got, want)
 	}
+}
+
+func initUnitRepo(t *testing.T) string {
+	t.Helper()
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "init", "-b", "main")
+	return repo
 }
 
 func TestRequireCleanValueStdoutAcceptsWindowsPath(t *testing.T) {
