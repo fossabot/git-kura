@@ -39,16 +39,6 @@ git merge fizz-feature                 # merge changes to main stream
 git kura close fizz-feature            # clean up worktree and branch
 ```
 
-## Concept
-
-Kura is built around three ideas:
-
-* **Worktree first**: each task gets its own Git worktree.
-* **Issue-keyed development**: an issue, ticket, or task number is used as the stable key for the workspace.
-* **AI-friendly resolution**: scripts, coding agents, and reviewers can resolve the same key to the same branch and worktree path without guessing.
-
-Kura is intentionally small. It is not a Git client, an AI agent manager, a pull request tool, or a project management tool. Its job is to provide a stable mapping between a task key and a Git worktree.
-
 ## Why Kura?
 
 When using Git worktrees with multiple AI coding agents, it is easy to lose track of which worktree belongs to which task.
@@ -64,6 +54,17 @@ task key
 ```
 
 The same key should always resolve to the same workspace.
+
+## Concept
+
+Kura（`蔵`） is built around four ideas:
+
+* **Keyed workspaces**: any stable key — an issue number, ticket ID, task name, feature slug, or review target — can identify one workspace.
+* **Worktree isolation**: each key gets its own Git worktree and branch.
+* **A small local kura**: Kura（`蔵`） keeps keyed worktrees and metadata in a repository-local store, so the right workspace can be put away, found, and cleaned up without relying on memory.
+* **Deterministic resolution**: humans, scripts, AI coding agents, and reviewers can resolve the same key to the same workspace without guessing.
+
+Kura is intentionally small. It is not a Git client, an AI agent manager, a pull request tool, an issue tracker client, or a project management tool. Its job is to provide a stable mapping between a key and a local Git worktree.
 
 ## Usage
 
@@ -94,7 +95,7 @@ git kura get fizz --branch
 Resolve the repository root path:
 
 ```sh
-git kura get fizz --root
+cd $(git kura get fizz --root)
 ```
 
 Get machine-readable metadata:
