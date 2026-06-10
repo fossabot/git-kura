@@ -49,3 +49,4 @@ tmp/
 temp/
 .cache/
 /git-kura
+*.local.json
