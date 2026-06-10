@@ -42,3 +42,8 @@ snapshot:
 
 changelog:
   disable: false
+
+sboms:
+  - id: git-kura
+    artifacts: archive
+    cmd: syft
