@@ -24,6 +24,14 @@ git kura close fizz             # remove the worktree for "fizz"
 git kura ls                     # list all open worktrees
 ```
 
+## Quick Start
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh
+```
+
+Installs `git-kura` into `~/.local/bin`. See [docs/installation.md](docs/installation.md) for version pinning, custom install directories, checksum verification, and other installation methods.
+
 ## Walkthrough
 
 ```sh
@@ -114,6 +122,14 @@ git kura close fizz
 See [docs/commands.md](docs/commands.md) for the command reference and [docs/output-format.md](docs/output-format.md) for structured output formats.
 
 ## Installation
+
+### curl installer (Linux and macOS)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh
+```
+
+See [docs/installation.md](docs/installation.md) for options such as `--version`, `--install-dir`, and `--require-signature`.
 
 ### Download from GitHub Releases
 
@@ -213,6 +229,7 @@ cp ./bin/git-kura /usr/local/bin/git-kura
 
 ## Documentation
 
+* [Installation](docs/installation.md)
 * [Commands](docs/commands.md)
 * [Output formats](docs/output-format.md)
 * [State management](docs/state-management.md)
