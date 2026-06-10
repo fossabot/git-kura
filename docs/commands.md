@@ -1,9 +1,26 @@
 # Commands
 
-Kura is invoked as a Git subcommand:
+`git-kura` is invoked as a Git subcommand:
 
 ```sh
 git kura <command> [arguments]
+```
+
+`git-kura` provides following commands.
+
+```sh
+git kura open fizz              # create a worktree and branch for key "fizz"
+git kura open fizz --dry-run    # print the worktree that would be created
+git kura get fizz               # print the open worktree path for "fizz"
+git kura get fizz --path        # print the worktree path for "fizz"
+git kura get fizz --branch      # print the branch name for "fizz"
+git kura get fizz --root        # print the repository root path
+git kura get fizz --format json # print workspace metadata as JSON
+git kura get fizz --json        # alias of `--format json`
+git kura get fizz --format toon # print workspace metadata as TOON for AI prompts
+git kura get fizz --toon        # alias of `--format toon`
+git kura close fizz             # remove the worktree for "fizz"
+git kura ls                     # list all open worktrees
 ```
 
 ## `git kura open <key>`
