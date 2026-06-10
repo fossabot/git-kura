@@ -39,7 +39,7 @@ tidy:
 
 .PHONY: build
 build:
-	go build -o ./bin/git-kura ./cmd/kura
+	go build -o ./bin/git-kura ./cmd/git-kura
 
 .PHONY: check
 check: fmt-check vet coverage vuln

@@ -4,7 +4,7 @@ project_name: git-kura
 
 builds:
   - id: git-kura
-    main: ./cmd/kura
+    main: ./cmd/git-kura
     binary: git-kura
     env:
       - CGO_ENABLED=0
