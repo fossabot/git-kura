@@ -13,6 +13,8 @@ import (
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	toon "github.com/toon-format/toon-go"
+	"github.com/tooppoo/git-kura/internal/gitutil"
+	"github.com/tooppoo/git-kura/internal/worktree"
 )
 
 // resolve by goreleaser
@@ -293,13 +295,13 @@ func parseKeyOnlyArgs(command string, args []string) (string, error) {
 // Command execution
 
 func cmdGet(key string, opts getOptions) error {
-	repoRoot, err := gitRepoRoot()
+	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	branch := branchName(key)
-	path, err := worktreePath(repoRoot, key)
+	branch := worktree.BranchName(key)
+	path, err := worktree.Path(repoRoot, key)
 	if err != nil {
 		return fmt.Errorf("resolve worktree path: %w", err)
 	}
@@ -310,7 +312,7 @@ func cmdGet(key string, opts getOptions) error {
 		return fmt.Errorf("check worktree path: %w", statErr)
 	}
 
-	meta, metaErr := readStructuredMetadata(repoRoot, key, path, exists)
+	meta, metaErr := worktree.ReadStructuredMetadata(repoRoot, key, path, exists)
 	if metaErr != nil {
 		return metaErr
 	}
@@ -330,7 +332,7 @@ func cmdGet(key string, opts getOptions) error {
 
 	dirty := false
 	if exists {
-		if dirty, err = worktreeDirty(path); err != nil {
+		if dirty, err = gitutil.WorktreeDirty(path); err != nil {
 			return fmt.Errorf("check worktree status: %w", err)
 		}
 	}
@@ -358,19 +360,19 @@ func cmdGet(key string, opts getOptions) error {
 }
 
 func cmdOpen(key string, opts openOptions) error {
-	repoRoot, err := gitRepoRoot()
+	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	path, err := worktreePath(repoRoot, key)
+	path, err := worktree.Path(repoRoot, key)
 	if err != nil {
 		return fmt.Errorf("resolve worktree path: %w", err)
 	}
-	branch := branchName(key)
+	branch := worktree.BranchName(key)
 
 	if opts.DryRun {
-		base, err := headBranch(repoRoot)
+		base, err := gitutil.HeadBranch(repoRoot)
 		if err != nil {
 			return fmt.Errorf("get base branch: %w", err)
 		}
@@ -399,13 +401,13 @@ func cmdOpen(key string, opts openOptions) error {
 		return fmt.Errorf("git worktree add: %w\n%s", err, out)
 	}
 
-	base, err := headBranch(repoRoot)
+	base, err := gitutil.HeadBranch(repoRoot)
 	if err != nil {
 		return fmt.Errorf("get base branch: %w", err)
 	}
 
-	meta := metadataFile{RepositoryRoot: repoRoot, BaseBranch: base, WorktreePath: path}
-	metaPath, err := metadataPath(repoRoot, key)
+	meta := worktree.MetadataFile{RepositoryRoot: repoRoot, BaseBranch: base, WorktreePath: path}
+	metaPath, err := worktree.MetadataPath(repoRoot, key)
 	if err != nil {
 		return fmt.Errorf("resolve metadata path: %w", err)
 	}
@@ -448,12 +450,12 @@ func parseLsArgs(args []string) error {
 }
 
 func cmdLs() error {
-	repoRoot, err := gitRepoRoot()
+	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	dir, err := stateDir(repoRoot)
+	dir, err := worktree.StateDir(repoRoot)
 	if err != nil {
 		return fmt.Errorf("resolve state dir: %w", err)
 	}
@@ -481,12 +483,12 @@ func cmdLs() error {
 }
 
 func cmdClose(key string) error {
-	repoRoot, err := gitRepoRoot()
+	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	path, err := worktreePath(repoRoot, key)
+	path, err := worktree.Path(repoRoot, key)
 	if err != nil {
 		return fmt.Errorf("resolve worktree path: %w", err)
 	}
@@ -502,11 +504,11 @@ func cmdClose(key string) error {
 		return fmt.Errorf("git worktree remove: %w\n%s", err, out)
 	}
 
-	if err := deleteBranch(repoRoot, branchName(key)); err != nil {
+	if err := gitutil.DeleteBranch(repoRoot, worktree.BranchName(key)); err != nil {
 		return err
 	}
 
-	meta, err := metadataPath(repoRoot, key)
+	meta, err := worktree.MetadataPath(repoRoot, key)
 	if err != nil {
 		return fmt.Errorf("resolve metadata path: %w", err)
 	}
@@ -515,56 +517,6 @@ func cmdClose(key string) error {
 	}
 
 	return nil
-}
-
-type metadataFile struct {
-	RepositoryRoot string `json:"repositoryRoot"`
-	BaseBranch     string `json:"baseBranch"`
-	WorktreePath   string `json:"worktreePath"`
-}
-
-func readMetadata(repoRoot, key string) (metadataFile, error) {
-	path, err := metadataPath(repoRoot, key)
-	if err != nil {
-		return metadataFile{}, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return metadataFile{}, err
-	}
-	var meta metadataFile
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return metadataFile{}, err
-	}
-	return meta, nil
-}
-
-func readStructuredMetadata(repoRoot, key, worktreePath string, worktreeExists bool) (metadataFile, error) {
-	metaPath, err := metadataPath(repoRoot, key)
-	if err != nil {
-		return metadataFile{}, fmt.Errorf("resolve metadata path: %w", err)
-	}
-
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if worktreeExists {
-				return metadataFile{}, fmt.Errorf("metadata for key %q is missing; worktree exists at %s, but Kura cannot reconstruct creation-time metadata such as baseBranch", key, worktreePath)
-			}
-			return metadataFile{}, fmt.Errorf("worktree for key %q is not open; run \"git kura open %s\" first", key, key)
-		}
-		return metadataFile{}, fmt.Errorf("read metadata for key %q: %w", key, err)
-	}
-
-	var meta metadataFile
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return metadataFile{}, fmt.Errorf("metadata for key %q is invalid: %w", key, err)
-	}
-	if !worktreeExists {
-		return metadataFile{}, fmt.Errorf("worktree for key %q is missing; metadata exists at %s, but expected worktree at %s", key, metaPath, worktreePath)
-	}
-
-	return meta, nil
 }
 
 type worktreeJSON struct {
@@ -577,98 +529,6 @@ type worktreeJSON struct {
 	BaseBranch     string `json:"baseBranch"     toon:"baseBranch"`
 	Exists         bool   `json:"exists"         toon:"exists"`
 	Dirty          bool   `json:"dirty"          toon:"dirty"`
-}
-
-// Git and workspace resolution
-
-func gitRepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func headBranch(repoRoot string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = repoRoot
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func deleteBranch(repoRoot, branch string) error {
-	cmd := exec.Command("git", "branch", "-d", branch)
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("delete branch %q: %w\n%s", branch, err, out)
-	}
-	return nil
-}
-
-func gitCommonDir(repoRoot string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
-	cmd.Dir = repoRoot
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-
-	dir := strings.TrimSpace(string(out))
-	if filepath.IsAbs(dir) {
-		return filepath.Clean(dir), nil
-	}
-	return filepath.Clean(filepath.Join(repoRoot, dir)), nil
-}
-
-func worktreeDirty(path string) (bool, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = path
-	out, err := cmd.Output()
-	if err != nil {
-		return false, err
-	}
-	return len(strings.TrimSpace(string(out))) > 0, nil
-}
-
-func stateDir(repoRoot string) (string, error) {
-	commonDir, err := gitCommonDir(repoRoot)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(commonDir, "kura"), nil
-}
-
-func worktreePath(repoRoot, key string) (string, error) {
-	dir, err := stateDir(repoRoot)
-	if err != nil {
-		return "", err
-	}
-	return worktreePathInStateDir(dir, key), nil
-}
-
-func metadataPath(repoRoot, key string) (string, error) {
-	dir, err := stateDir(repoRoot)
-	if err != nil {
-		return "", err
-	}
-	return metadataPathInStateDir(dir, key), nil
-}
-
-func worktreePathInStateDir(stateDir, key string) string {
-	return filepath.Join(stateDir, "worktrees", key)
-}
-
-func metadataPathInStateDir(stateDir, key string) string {
-	return filepath.Join(stateDir, "meta", "worktrees", key+".json")
-}
-
-func branchName(key string) string {
-	return key
 }
 
 // Validation

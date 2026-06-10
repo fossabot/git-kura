@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -47,48 +45,6 @@ func TestValidateKeyRejectsInvalidKeys(t *testing.T) {
 		t.Run(printableName(key), func(t *testing.T) {
 			if err := validateKey(key); err == nil {
 				t.Fatalf("validateKey(%q) = nil, want error", key)
-			}
-		})
-	}
-}
-
-func TestBranchName(t *testing.T) {
-	for _, tc := range []struct {
-		key  string
-		want string
-	}{
-		{"51", "51"},
-		{"ABC-123", "ABC-123"},
-		{"release-2026-06", "release-2026-06"},
-	} {
-		t.Run(tc.key, func(t *testing.T) {
-			if got := branchName(tc.key); got != tc.want {
-				t.Fatalf("branchName(%q) = %q, want %q", tc.key, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestWorktreePath(t *testing.T) {
-	for _, tc := range []struct {
-		stateDir string
-		key      string
-		want     string
-	}{
-		{
-			stateDir: filepath.Join("/home", "user", "repo", ".git", "kura"),
-			key:      "51",
-			want:     filepath.Join("/home", "user", "repo", ".git", "kura", "worktrees", "51"),
-		},
-		{
-			stateDir: filepath.Join("/home", "user", "myproject", ".git", "kura"),
-			key:      "feature",
-			want:     filepath.Join("/home", "user", "myproject", ".git", "kura", "worktrees", "feature"),
-		},
-	} {
-		t.Run(tc.key, func(t *testing.T) {
-			if got := worktreePathInStateDir(tc.stateDir, tc.key); got != tc.want {
-				t.Fatalf("worktreePathInStateDir(%q, %q) = %q, want %q", tc.stateDir, tc.key, got, tc.want)
 			}
 		})
 	}
@@ -330,120 +286,6 @@ func TestParseKeyOnlyArgs(t *testing.T) {
 	})
 }
 
-func TestGitHelpersReturnErrors(t *testing.T) {
-	dir := t.TempDir()
-
-	if _, err := headBranch(dir); err == nil {
-		t.Fatal("headBranch outside git repo error = nil, want error")
-	}
-	if _, err := worktreeDirty(dir); err == nil {
-		t.Fatal("worktreeDirty outside git repo error = nil, want error")
-	}
-}
-
-func TestGitCommonDirSupportsLinkedWorktree(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	linked := filepath.Join(t.TempDir(), "linked")
-
-	git(t, repo, "worktree", "add", "-b", "linked", linked)
-
-	commonDir, err := gitCommonDir(linked)
-	if err != nil {
-		t.Fatalf("gitCommonDir linked worktree error = %v", err)
-	}
-	want := filepath.Join(repo, ".git")
-	if commonDir != want {
-		t.Fatalf("gitCommonDir linked worktree = %q, want %q", commonDir, want)
-	}
-}
-
-func TestReadMetadata(t *testing.T) {
-	repo := initUnitRepo(t)
-	path := expectedMetadataPath(repo, "51")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, path, `{"repositoryRoot":"/repo","baseBranch":"main","worktreePath":"/tmp/worktree"}`)
-
-	meta, err := readMetadata(repo, "51")
-	if err != nil {
-		t.Fatalf("readMetadata error = %v", err)
-	}
-	if meta.RepositoryRoot != "/repo" || meta.BaseBranch != "main" || meta.WorktreePath != "/tmp/worktree" {
-		t.Fatalf("metadata = %+v, want repositoryRoot /repo, baseBranch main, worktreePath /tmp/worktree", meta)
-	}
-
-	writeFile(t, path, `{`)
-	if _, err := readMetadata(repo, "51"); err == nil {
-		t.Fatal("readMetadata invalid JSON error = nil, want error")
-	}
-
-	if _, err := readMetadata(repo, "missing"); err == nil {
-		t.Fatal("readMetadata missing file error = nil, want error")
-	}
-}
-
-func TestReadStructuredMetadata(t *testing.T) {
-	repo := initUnitRepo(t)
-	worktree := expectedWorktreePath(repo, "51")
-	metadata := expectedMetadataPath(repo, "51")
-
-	if _, err := readStructuredMetadata(repo, "51", worktree, false); err == nil {
-		t.Fatal("readStructuredMetadata unopened key error = nil, want error")
-	} else if !strings.Contains(err.Error(), "not open") {
-		t.Fatalf("error = %q, want it to mention not open", err.Error())
-	}
-
-	if err := os.MkdirAll(worktree, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := readStructuredMetadata(repo, "51", worktree, true); err == nil {
-		t.Fatal("readStructuredMetadata missing metadata error = nil, want error")
-	} else if !strings.Contains(err.Error(), "metadata") || !strings.Contains(err.Error(), "missing") {
-		t.Fatalf("error = %q, want it to mention missing metadata", err.Error())
-	}
-
-	if err := os.MkdirAll(filepath.Dir(metadata), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, metadata, `{`)
-	if _, err := readStructuredMetadata(repo, "51", worktree, true); err == nil {
-		t.Fatal("readStructuredMetadata invalid JSON error = nil, want error")
-	} else if !strings.Contains(err.Error(), "invalid") {
-		t.Fatalf("error = %q, want it to mention invalid", err.Error())
-	}
-
-	writeFile(t, metadata, `{"repositoryRoot":"`+repo+`","baseBranch":"main","worktreePath":"`+worktree+`"}`)
-	meta, err := readStructuredMetadata(repo, "51", worktree, true)
-	if err != nil {
-		t.Fatalf("readStructuredMetadata error = %v", err)
-	}
-	if meta.RepositoryRoot != repo || meta.BaseBranch != "main" || meta.WorktreePath != worktree {
-		t.Fatalf("metadata = %+v, want repositoryRoot %s, baseBranch main, worktreePath %s", meta, repo, worktree)
-	}
-
-	if _, err := readStructuredMetadata(repo, "51", worktree, false); err == nil {
-		t.Fatal("readStructuredMetadata missing worktree error = nil, want error")
-	} else if !strings.Contains(err.Error(), "worktree") || !strings.Contains(err.Error(), "missing") {
-		t.Fatalf("error = %q, want it to mention missing worktree", err.Error())
-	}
-}
-
-func TestPathHelpersReturnErrorsOutsideRepository(t *testing.T) {
-	dir := t.TempDir()
-
-	if _, err := stateDir(dir); err == nil {
-		t.Fatal("stateDir outside git repo error = nil, want error")
-	}
-	if _, err := worktreePath(dir, "51"); err == nil {
-		t.Fatal("worktreePath outside git repo error = nil, want error")
-	}
-	if _, err := metadataPath(dir, "51"); err == nil {
-		t.Fatal("metadataPath outside git repo error = nil, want error")
-	}
-}
-
 func TestPrintJSONRejectsInvalidData(t *testing.T) {
 	if err := printJSON(worktreeJSON{}); err == nil {
 		t.Fatal("printJSON invalid data error = nil, want error")
@@ -513,25 +355,6 @@ func TestPrintTOONFields(t *testing.T) {
 	if len(lines) != 9 {
 		t.Errorf("line count = %d, want 9\nfull output:\n%s", len(lines), stdout)
 	}
-}
-
-func TestMetadataPath(t *testing.T) {
-	stateDir := filepath.Join("/home", "user", "repo", ".git", "kura")
-	want := filepath.Join("/home", "user", "repo", ".git", "kura", "meta", "worktrees", "51.json")
-	if got := metadataPathInStateDir(stateDir, "51"); got != want {
-		t.Fatalf("metadataPathInStateDir(%q, 51) = %q, want %q", stateDir, got, want)
-	}
-}
-
-func initUnitRepo(t *testing.T) string {
-	t.Helper()
-
-	repo := filepath.Join(t.TempDir(), "repo")
-	if err := os.Mkdir(repo, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git(t, repo, "init", "-b", "main")
-	return repo
 }
 
 func TestRequireCleanValueStdoutAcceptsWindowsPath(t *testing.T) {
