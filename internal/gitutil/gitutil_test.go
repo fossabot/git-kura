@@ -21,6 +21,76 @@ func TestGitHelpersReturnErrors(t *testing.T) {
 	}
 }
 
+func TestRepoRootReturnsPath(t *testing.T) {
+	root, err := gitutil.RepoRoot()
+	if err != nil {
+		t.Fatalf("RepoRoot error = %v", err)
+	}
+	if root == "" {
+		t.Fatal("RepoRoot = empty, want non-empty path")
+	}
+}
+
+func TestHeadBranchReturnsCurrentBranch(t *testing.T) {
+	repo := initRepo(t)
+
+	branch, err := gitutil.HeadBranch(repo)
+	if err != nil {
+		t.Fatalf("HeadBranch error = %v", err)
+	}
+	if branch != "main" {
+		t.Fatalf("HeadBranch = %q, want %q", branch, "main")
+	}
+}
+
+func TestDeleteBranch(t *testing.T) {
+	t.Run("deletes existing branch", func(t *testing.T) {
+		repo := initRepo(t)
+		gitCmd(t, repo, "branch", "to-delete")
+
+		if err := gitutil.DeleteBranch(repo, "to-delete"); err != nil {
+			t.Fatalf("DeleteBranch error = %v", err)
+		}
+	})
+
+	t.Run("returns error for non-existent branch", func(t *testing.T) {
+		repo := initRepo(t)
+
+		if err := gitutil.DeleteBranch(repo, "no-such-branch"); err == nil {
+			t.Fatal("DeleteBranch non-existent branch error = nil, want error")
+		}
+	})
+}
+
+func TestWorktreeDirty(t *testing.T) {
+	t.Run("clean worktree returns false", func(t *testing.T) {
+		repo := initRepo(t)
+
+		dirty, err := gitutil.WorktreeDirty(repo)
+		if err != nil {
+			t.Fatalf("WorktreeDirty error = %v", err)
+		}
+		if dirty {
+			t.Fatal("WorktreeDirty clean repo = true, want false")
+		}
+	})
+
+	t.Run("untracked file returns true", func(t *testing.T) {
+		repo := initRepo(t)
+		if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		dirty, err := gitutil.WorktreeDirty(repo)
+		if err != nil {
+			t.Fatalf("WorktreeDirty error = %v", err)
+		}
+		if !dirty {
+			t.Fatal("WorktreeDirty untracked file = false, want true")
+		}
+	})
+}
+
 func TestGitCommonDirSupportsLinkedWorktree(t *testing.T) {
 	repo := initRepo(t)
 	linked := filepath.Join(t.TempDir(), "linked")
