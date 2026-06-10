@@ -15,6 +15,10 @@ import (
 	toon "github.com/toon-format/toon-go"
 )
 
+// resolve by goreleaser
+// https://goreleaser.com/resources/cookbooks/using-main.version/
+var version string = "dev"
+
 //go:embed schema/output.schema.json
 var outputSchemaJSON []byte
 
@@ -35,10 +39,6 @@ func mustCompileOutputSchema() *jsonschema.Schema {
 	}
 	return sch
 }
-
-// Entrypoint and dispatch
-
-var version = "0.0.0-alpha"
 
 const topLevelHelp = `Usage: git kura <command> [key] [flags]
 
