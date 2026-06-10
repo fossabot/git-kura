@@ -30,7 +30,8 @@ jobs:
         run: test -x "$HOME/.local/bin/git-kura"
 
       - name: Verify git-kura responds to -h
-        run: "$HOME/.local/bin/git-kura" -h
+        run: |
+          "$HOME/.local/bin/git-kura" -h
 
       - name: Install to custom dir
         run: |
@@ -51,4 +52,5 @@ jobs:
         run: test -x "$HOME/.local/bin/git-kura"
 
       - name: Verify git-kura responds to -h
-        run: "$HOME/.local/bin/git-kura" -h
+        run: |
+          "$HOME/.local/bin/git-kura" -h
