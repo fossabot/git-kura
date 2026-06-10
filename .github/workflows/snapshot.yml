@@ -48,13 +48,17 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-24.04
-            archive: git-kura_Linux_x86_64.tar.gz
+            os: Linux
+            arch: x86_64
           - runner: ubuntu-24.04-arm
-            archive: git-kura_Linux_arm64.tar.gz
+            os: Linux
+            arch: arm64
           - runner: macos-15-intel
-            archive: git-kura_Darwin_x86_64.tar.gz
+            os: Darwin
+            arch: x86_64
           - runner: macos-15
-            archive: git-kura_Darwin_arm64.tar.gz
+            os: Darwin
+            arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/download-artifact@v6
@@ -65,7 +69,9 @@ jobs:
       - name: Extract artifact
         run: |
           mkdir out
-          tar -xzf "dist/${{ matrix.archive }}" -C out
+          archive="$(find dist -maxdepth 1 -type f -name "git-kura_*_${{ matrix.os }}_${{ matrix.arch }}.tar.gz" | head -n 1)"
+          test -n "$archive"
+          tar -xzf "$archive" -C out
           ls -la out
 
       - name: Smoke test CLI
@@ -106,9 +112,9 @@ jobs:
       matrix:
         include:
           - runner: windows-2025
-            archive: git-kura_Windows_x86_64.zip
+            arch: x86_64
           - runner: windows-11-arm
-            archive: git-kura_Windows_arm64.zip
+            arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/download-artifact@v6
@@ -120,9 +126,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Expand-Archive "dist/${{ matrix.archive }}" -DestinationPath out
+          $archives = Get-ChildItem dist -Filter "git-kura_*_Windows_${{ matrix.arch }}.zip"
+          if ($archives.Count -ne 1) {
+            Get-ChildItem dist
+            throw "Expected exactly one archive, found $($archives.Count)"
+          }
+          Expand-Archive $archives[0].FullName -DestinationPath out
           Get-ChildItem out
-
       - name: Smoke test CLI
         shell: pwsh
         run: |

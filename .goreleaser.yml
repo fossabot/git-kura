@@ -38,7 +38,7 @@ checksum:
     - release-archives
 
 snapshot:
-  version_template: '{{ .Tag }}-snapshot'
+  version_template: '{{ .Version }}-snapshot'
 
 changelog:
   disable: false
