@@ -22,6 +22,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Run GoReleaser check
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -34,10 +37,10 @@ jobs:
         with:
           distribution: goreleaser
           version-file: .tool-versions
-          args: release --snapshot --clean
+          args: release --snapshot --clean --skip=sign
 
       - name: Upload snapshot artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: git-kura-snapshot-artifacts
           path: dist/*
@@ -62,7 +65,7 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: git-kura-snapshot-artifacts
           path: dist
@@ -118,7 +121,7 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: git-kura-snapshot-artifacts
           path: dist
