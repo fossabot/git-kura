@@ -1,0 +1,54 @@
+name: Installer
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  checksum-logic:
+    name: Checksum verification logic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run installer unit tests
+        run: sh scripts/test-installer.sh
+
+  smoke-linux:
+    name: Smoke test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install git-kura
+        run: |
+          sh install.sh --version v0.0.2 --install-dir "$HOME/.local/bin"
+
+      - name: Verify binary is in install dir
+        run: test -x "$HOME/.local/bin/git-kura"
+
+      - name: Verify git-kura responds to -h
+        run: "$HOME/.local/bin/git-kura" -h
+
+      - name: Install to custom dir
+        run: |
+          sh install.sh --version v0.0.2 --install-dir /tmp/kura-custom-bin
+          test -x /tmp/kura-custom-bin/git-kura
+
+  smoke-macos:
+    name: Smoke test (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install git-kura
+        run: |
+          sh install.sh --version v0.0.2 --install-dir "$HOME/.local/bin"
+
+      - name: Verify binary is in install dir
+        run: test -x "$HOME/.local/bin/git-kura"
+
+      - name: Verify git-kura responds to -h
+        run: "$HOME/.local/bin/git-kura" -h
