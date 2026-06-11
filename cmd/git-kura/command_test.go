@@ -29,6 +29,9 @@ func TestRunHelpAndUsage(t *testing.T) {
 		{name: "seal help (short)", args: []string{"seal", "--help"}, want: "Usage: git kura seal"},
 		{name: "seal enter help", args: []string{"seal", "enter", "--help"}, want: "Usage: git kura seal enter"},
 		{name: "seal current help", args: []string{"seal", "current", "--help"}, want: "Usage: git kura seal current"},
+		{name: "seal session help", args: []string{"seal", "session", "--help"}, want: "Usage: git kura seal session"},
+		{name: "seal session ls help", args: []string{"seal", "session", "ls", "--help"}, want: "Usage: git kura seal session ls"},
+		{name: "seal session clean help", args: []string{"seal", "session", "clean", "--help"}, want: "Usage: git kura seal session clean"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := captureStdout(t, func() error {
@@ -79,6 +82,10 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"seal", "enter", "key", "--"},
 		{"seal", "current", "extra"},
 		{"seal", "unknown"},
+		{"seal", "session"},
+		{"seal", "session", "ls", "extra"},
+		{"seal", "session", "clean", "extra"},
+		{"seal", "session", "unknown"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := run(args); err == nil {
@@ -486,6 +493,282 @@ func TestRunLsInProcess(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("ls after close stdout = %q, want line 52", stdout)
+		}
+	})
+}
+
+func TestCmdSealSessionLsEmpty(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "ls"})
+		})
+		if err != nil {
+			t.Fatalf("seal session ls error = %v, want nil", err)
+		}
+		if !strings.Contains(stdout, "key") {
+			t.Fatalf("stdout = %q, want header row containing 'key'", stdout)
+		}
+	})
+}
+
+func TestCmdSealSessionLsWithSessions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "active-key", WorktreePath: "/wt-active",
+			ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: time.Now(),
+		})
+
+		dead := deadPIDForTest(t)
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "stale-key", WorktreePath: "/wt-stale",
+			ParentPID: dead, StartedAt: time.Now().Add(-10 * time.Minute),
+		})
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "ls"})
+		})
+		if err != nil {
+			t.Fatalf("seal session ls error = %v, want nil", err)
+		}
+		for _, want := range []string{"active-key", "stale-key", sessionStatusStale} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("stdout = %q, want it to contain %q", stdout, want)
+			}
+		}
+	})
+}
+
+func TestCmdSealSessionLsTTLExceeded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+
+		// Alive PIDs but started long ago → stale-candidate
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "old-key", WorktreePath: "/wt-old",
+			ParentPID: os.Getpid(), ChildPID: os.Getpid(),
+			StartedAt: time.Now().Add(-10 * time.Minute),
+		})
+
+		t.Setenv("GIT_KURA_SESSION_TTL", "5m")
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "ls"})
+		})
+		if err != nil {
+			t.Fatalf("seal session ls error = %v, want nil", err)
+		}
+		if !strings.Contains(stdout, "ttl") {
+			t.Fatalf("stdout = %q, want it to contain 'ttl' for stale-candidate", stdout)
+		}
+	})
+}
+
+func TestCmdSealSessionCleanNoStale(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "active-key", WorktreePath: "/wt-active",
+			ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: time.Now(),
+		})
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "clean"})
+		})
+		if err != nil {
+			t.Fatalf("seal session clean error = %v, want nil", err)
+		}
+		if !strings.Contains(strings.ToLower(stdout), "no stale") {
+			t.Fatalf("stdout = %q, want 'no stale' message", stdout)
+		}
+		// Active session must not have been deleted
+		activePath := sealSessionPath(sessDir, "/wt-active")
+		if _, statErr := os.Stat(activePath); statErr != nil {
+			t.Fatalf("active session was unexpectedly deleted: %v", statErr)
+		}
+	})
+}
+
+func TestCmdSealSessionCleanWithStale(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+
+		dead := deadPIDForTest(t)
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "stale-key", WorktreePath: "/wt-stale",
+			ParentPID: dead, StartedAt: time.Now(),
+		})
+		stalePath := sealSessionPath(sessDir, "/wt-stale")
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "clean"})
+		})
+		if err != nil {
+			t.Fatalf("seal session clean error = %v, want nil", err)
+		}
+		if !strings.Contains(stdout, "stale-key") {
+			t.Fatalf("stdout = %q, want it to mention stale-key", stdout)
+		}
+		if _, statErr := os.Stat(stalePath); !os.IsNotExist(statErr) {
+			t.Fatalf("stale session was not deleted (stat err = %v)", statErr)
+		}
+	})
+}
+
+func TestCmdSealSessionCleanKeepsTTLOnlyStale(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+
+		// TTL-exceeded but alive PIDs → must NOT be deleted
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "ttl-key", WorktreePath: "/wt-ttl",
+			ParentPID: os.Getpid(), ChildPID: os.Getpid(),
+			StartedAt: time.Now().Add(-10 * time.Minute),
+		})
+		ttlPath := sealSessionPath(sessDir, "/wt-ttl")
+
+		if _, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "clean"})
+		}); err != nil {
+			t.Fatalf("seal session clean error = %v, want nil", err)
+		}
+
+		if _, statErr := os.Stat(ttlPath); statErr != nil {
+			t.Fatalf("ttl-exceeded-but-alive session was unexpectedly deleted: %v", statErr)
+		}
+	})
+}
+
+func TestCmdSealSessionLsShowsCorrupt(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+		if err := os.MkdirAll(sessDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		corruptPath := filepath.Join(sessDir, "corrupt.json")
+		if err := os.WriteFile(corruptPath, []byte("not json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Remove(corruptPath) }) //nolint:errcheck
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "ls"})
+		})
+		if err != nil {
+			t.Fatalf("seal session ls error = %v, want nil", err)
+		}
+		if !strings.Contains(stdout, "corrupt") {
+			t.Fatalf("stdout = %q, want it to contain 'corrupt'", stdout)
+		}
+	})
+}
+
+func TestCmdSealSessionCleanWarnsAboutCorrupt(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+		if err := os.MkdirAll(sessDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		corruptPath := filepath.Join(sessDir, "corrupt.json")
+		if err := os.WriteFile(corruptPath, []byte("not json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Remove(corruptPath) }) //nolint:errcheck
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "clean"})
+		})
+		if err != nil {
+			t.Fatalf("seal session clean error = %v, want nil", err)
+		}
+		// corrupt file must be warned about but NOT deleted
+		if !strings.Contains(strings.ToLower(stdout), "corrupt") {
+			t.Fatalf("stdout = %q, want warning about corrupt file", stdout)
+		}
+		if _, statErr := os.Stat(corruptPath); statErr != nil {
+			t.Fatalf("corrupt file was unexpectedly deleted: %v", statErr)
+		}
+	})
+}
+
+func TestCmdSealSessionOutsideRepo(t *testing.T) {
+	outside := t.TempDir()
+	withWorkingDir(t, outside, func() {
+		for _, args := range [][]string{
+			{"seal", "session", "ls"},
+			{"seal", "session", "clean"},
+		} {
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				if err := run(args); err == nil {
+					t.Fatalf("run(%v) outside repo error = nil, want error", args)
+				}
+			})
 		}
 	})
 }
