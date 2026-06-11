@@ -369,40 +369,40 @@ func TestRequireCleanValueStdoutAcceptsWindowsPath(t *testing.T) {
 
 func TestParseSealEnterArgs(t *testing.T) {
 	t.Run("valid key with no command", func(t *testing.T) {
-		key, cmd, err := parseSealEnterArgs([]string{"issue-12"})
+		a, err := parseSealEnterArgs([]string{"issue-12"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if key != "issue-12" {
-			t.Fatalf("key = %q, want %q", key, "issue-12")
+		if a.Key != "issue-12" {
+			t.Fatalf("Key = %q, want %q", a.Key, "issue-12")
 		}
-		if len(cmd) != 0 {
-			t.Fatalf("command = %v, want empty", cmd)
+		if len(a.Command) != 0 {
+			t.Fatalf("Command = %v, want empty", a.Command)
 		}
 	})
 
 	t.Run("-- command returns key and command", func(t *testing.T) {
-		key, cmd, err := parseSealEnterArgs([]string{"issue-12", "--", "echo", "hi"})
+		a, err := parseSealEnterArgs([]string{"issue-12", "--", "echo", "hi"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if key != "issue-12" {
-			t.Fatalf("key = %q, want %q", key, "issue-12")
+		if a.Key != "issue-12" {
+			t.Fatalf("Key = %q, want %q", a.Key, "issue-12")
 		}
-		if len(cmd) != 2 || cmd[0] != "echo" || cmd[1] != "hi" {
-			t.Fatalf("command = %v, want [echo hi]", cmd)
+		if len(a.Command) != 2 || a.Command[0] != "echo" || a.Command[1] != "hi" {
+			t.Fatalf("Command = %v, want [echo hi]", a.Command)
 		}
 	})
 
 	t.Run("no key is usage error", func(t *testing.T) {
-		_, _, err := parseSealEnterArgs([]string{})
+		_, err := parseSealEnterArgs([]string{})
 		if err == nil {
 			t.Fatal("expected error for missing key, got nil")
 		}
 	})
 
 	t.Run("invalid key is error", func(t *testing.T) {
-		_, _, err := parseSealEnterArgs([]string{"../x"})
+		_, err := parseSealEnterArgs([]string{"../x"})
 		if err == nil {
 			t.Fatal("expected error for invalid key, got nil")
 		}
@@ -412,14 +412,14 @@ func TestParseSealEnterArgs(t *testing.T) {
 	})
 
 	t.Run("extra argument without -- is error", func(t *testing.T) {
-		_, _, err := parseSealEnterArgs([]string{"issue-12", "extra"})
+		_, err := parseSealEnterArgs([]string{"issue-12", "extra"})
 		if err == nil {
 			t.Fatal("expected error for extra argument, got nil")
 		}
 	})
 
 	t.Run("-- with no command is error", func(t *testing.T) {
-		_, _, err := parseSealEnterArgs([]string{"issue-12", "--"})
+		_, err := parseSealEnterArgs([]string{"issue-12", "--"})
 		if err == nil {
 			t.Fatal("expected error for -- with no command, got nil")
 		}

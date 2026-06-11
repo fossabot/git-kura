@@ -1,6 +1,8 @@
 package main
 
 import (
+	_ "embed"
+
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,14 +15,22 @@ import (
 	"github.com/tooppoo/git-kura/internal/gitutil"
 )
 
+//go:embed schema/session.schema.json
+var sealSessionSchemaJSON []byte
+
 const defaultSessionTTL = 5 * time.Minute
 
+const sealSessionSchemaVersion = 1
+
+// sealSession is the on-disk record written to <git-common-dir>/kura/sessions/*.json.
+// See schema/session.schema.json for the full field specification.
 type sealSession struct {
-	Key          string    `json:"key"`
-	WorktreePath string    `json:"worktree"`
-	ParentPID    int       `json:"parent_pid"`
-	ChildPID     int       `json:"child_pid"`
-	StartedAt    time.Time `json:"started_at"`
+	SchemaVersion int       `json:"schemaVersion"`
+	Key           string    `json:"key"`
+	WorktreePath  string    `json:"worktree"`
+	ParentPID     int       `json:"parent_pid"`
+	ChildPID      int       `json:"child_pid"`
+	StartedAt     time.Time `json:"started_at"`
 }
 
 func sealSessionDir(repoRoot string) (string, error) {
@@ -57,11 +67,15 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 	}
 
 	sess := sealSession{
-		Key:          key,
-		WorktreePath: worktreePath,
-		ParentPID:    parentPID,
-		ChildPID:     0,
-		StartedAt:    time.Now(),
+		SchemaVersion: sealSessionSchemaVersion,
+		Key:           key,
+		WorktreePath:  worktreePath,
+		ParentPID:     parentPID,
+		// ChildPID is 0 (sentinel) until cmd.Start() returns the child PID.
+		// The session must be acquired before the child is launched to prevent
+		// a race between concurrent seal enter calls for the same worktree.
+		ChildPID:  0,
+		StartedAt: time.Now(),
 	}
 
 	finalPath := sealSessionPath(sessDir, worktreePath)

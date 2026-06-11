@@ -32,6 +32,11 @@ const sealCurrentHelp = `Usage: git kura seal current
 Print the value of GIT_KURA_SEAL_KEY.
 Exits with non-zero if GIT_KURA_SEAL_KEY is not set.`
 
+type sealEnterArgs struct {
+	Key     string
+	Command []string
+}
+
 func argsBeforeDoubleDash(args []string) []string {
 	for i, a := range args {
 		if a == "--" {
@@ -55,11 +60,11 @@ func runSeal(args []string) error {
 			fmt.Println(sealEnterHelp)
 			return nil
 		}
-		key, command, err := parseSealEnterArgs(args[1:])
+		a, err := parseSealEnterArgs(args[1:])
 		if err != nil {
 			return err
 		}
-		return cmdSealEnter(key, command)
+		return cmdSealEnter(a.Key, a.Command)
 	case "current":
 		if hasHelpFlag(args[1:]) {
 			fmt.Println(sealCurrentHelp)
@@ -74,27 +79,27 @@ func runSeal(args []string) error {
 	}
 }
 
-func parseSealEnterArgs(args []string) (string, []string, error) {
+func parseSealEnterArgs(args []string) (sealEnterArgs, error) {
 	if len(args) == 0 {
-		return "", nil, fmt.Errorf("usage: git kura seal enter <key> [-- <command...>]")
+		return sealEnterArgs{}, fmt.Errorf("usage: git kura seal enter <key> [-- <command...>]")
 	}
 
 	key := args[0]
 	if err := validateKey(key); err != nil {
-		return "", nil, err
+		return sealEnterArgs{}, err
 	}
 
 	rest := args[1:]
 	if len(rest) == 0 {
-		return key, nil, nil
+		return sealEnterArgs{Key: key}, nil
 	}
 	if rest[0] != "--" {
-		return "", nil, fmt.Errorf("usage: git kura seal enter <key> [-- <command...>]: unexpected argument %q", rest[0])
+		return sealEnterArgs{}, fmt.Errorf("usage: git kura seal enter <key> [-- <command...>]: unexpected argument %q", rest[0])
 	}
 	if len(rest) < 2 {
-		return "", nil, fmt.Errorf("usage: git kura seal enter <key> -- <command...>: command required after --")
+		return sealEnterArgs{}, fmt.Errorf("usage: git kura seal enter <key> -- <command...>: command required after --")
 	}
-	return key, rest[1:], nil
+	return sealEnterArgs{Key: key, Command: rest[1:]}, nil
 }
 
 func parseSealCurrentArgs(args []string) error {
