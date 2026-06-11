@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
@@ -40,12 +41,13 @@ func sealSessionPath(sessDir, worktreePath string) string {
 	return filepath.Join(sessDir, hex.EncodeToString(h[:8])+".json")
 }
 
-// acquireSealSession atomically creates a session record for the given
-// worktree using O_CREATE|O_EXCL on a path that is scoped to the worktree.
-// Because all concurrent callers for the same worktree compete for the same
-// filename, exactly one of them can create it; the rest observe the file and
-// either receive a conflict error (live session) or retry once after cleaning
-// up a stale session (dead PIDs).
+// acquireSealSession atomically acquires a session record for the given worktree.
+//
+// It first writes complete JSON to a temp file, then calls os.Link(tmp, final).
+// Because os.Link is atomic and fails with EEXIST when the target already exists,
+// the final path always contains complete JSON — partial writes are never visible
+// to concurrent callers, which eliminates the corrupt-record race that arises when
+// O_CREATE|O_EXCL is used directly (empty file visible between create and write).
 func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (string, sealSession, error) {
 	if err := os.MkdirAll(sessDir, 0o755); err != nil {
 		return "", sealSession{}, fmt.Errorf("create session store: %w", err)
@@ -58,44 +60,47 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 		ChildPID:     0,
 		StartedAt:    time.Now(),
 	}
-	path := sealSessionPath(sessDir, worktreePath)
+
+	finalPath := sealSessionPath(sessDir, worktreePath)
+	// Per-PID temp path: unique so concurrent callers don't clobber each other's writes.
+	tmpPath := finalPath + ".tmp." + strconv.Itoa(parentPID)
+
+	data, _ := json.Marshal(sess)
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return "", sealSession{}, fmt.Errorf("write temp session file: %w", err)
+	}
 
 	for attempt := 0; attempt < 2; attempt++ {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			data, _ := json.Marshal(sess)
-			_, writeErr := f.Write(data)
-			f.Close()
-			if writeErr != nil {
-				os.Remove(path)
-				return "", sealSession{}, fmt.Errorf("write session record: %w", writeErr)
-			}
-			return path, sess, nil
+		// Atomic: succeeds only if finalPath does not yet exist.
+		if err := os.Link(tmpPath, finalPath); err == nil {
+			os.Remove(tmpPath)
+			return finalPath, sess, nil
+		} else if !os.IsExist(err) {
+			os.Remove(tmpPath)
+			return "", sealSession{}, fmt.Errorf("acquire session lock: %w", err)
 		}
 
-		if !os.IsExist(err) {
-			return "", sealSession{}, fmt.Errorf("create session record: %w", err)
-		}
-
-		// File exists: inspect it.
-		data, readErr := os.ReadFile(path)
+		// finalPath already exists — always complete JSON (also written via Link).
+		existingData, readErr := os.ReadFile(finalPath)
 		if readErr != nil {
-			return "", sealSession{}, fmt.Errorf("read existing session: %w", readErr)
+			// Unreadable: treat as locked, do not delete.
+			os.Remove(tmpPath)
+			return "", sealSession{}, fmt.Errorf("session is locked or unreadable: %w", readErr)
 		}
 		var existing sealSession
-		if jsonErr := json.Unmarshal(data, &existing); jsonErr != nil {
-			// Corrupt record — remove and retry.
-			os.Remove(path)
-			continue
+		if jsonErr := json.Unmarshal(existingData, &existing); jsonErr != nil {
+			// Corrupt: treat as locked, do not delete — caller resolves manually.
+			os.Remove(tmpPath)
+			return "", sealSession{}, fmt.Errorf("session file for this worktree is locked or corrupt; verify state in %s", finalPath)
 		}
 
 		if !sessionAlive(existing) {
-			// Stale — remove and retry.
-			os.Remove(path)
-			continue
+			os.Remove(finalPath)
+			continue // stale — retry
 		}
 
 		// Active live session: report conflict.
+		os.Remove(tmpPath)
 		age := time.Since(existing.StartedAt).Truncate(time.Second)
 		if existing.Key == key {
 			return "", sealSession{}, fmt.Errorf(
@@ -113,6 +118,7 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 		return "", sealSession{}, fmt.Errorf("%s", msg)
 	}
 
+	os.Remove(tmpPath)
 	return "", sealSession{}, fmt.Errorf("could not acquire session record after retry")
 }
 
