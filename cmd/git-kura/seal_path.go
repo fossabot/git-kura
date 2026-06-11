@@ -71,7 +71,7 @@ func normalizeSealPath(repoRoot, rawPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve path relative to repo root: %w", err)
 	}
-	if strings.HasPrefix(rel, "..") {
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path %q is outside the repository root", rawPath)
 	}
 	return rel, nil
@@ -94,7 +94,7 @@ func findKeyForPath(sealDir, repoRelPath string) (string, error) {
 		storePath := filepath.Join(sealDir, entry.Name())
 		store, err := readSealPathStore(storePath)
 		if err != nil {
-			continue
+			return "", fmt.Errorf("read seal store %s: %w", entry.Name(), err)
 		}
 		for _, p := range store.Paths {
 			if p == repoRelPath {
@@ -109,6 +109,9 @@ func cmdSealAdd(rawPath string) error {
 	key := os.Getenv("GIT_KURA_SEAL_KEY")
 	if key == "" {
 		return fmt.Errorf("not in sealed session (GIT_KURA_SEAL_KEY not set), run 'git kura seal enter <key>' to start one")
+	}
+	if err := validateKey(key); err != nil {
+		return fmt.Errorf("GIT_KURA_SEAL_KEY is invalid: %w", err)
 	}
 
 	repoRoot, err := gitutil.RepoRoot()
@@ -165,6 +168,9 @@ func cmdSealRemove(rawPath string) error {
 	key := os.Getenv("GIT_KURA_SEAL_KEY")
 	if key == "" {
 		return fmt.Errorf("not in sealed session (GIT_KURA_SEAL_KEY not set), run 'git kura seal enter <key>' to start one")
+	}
+	if err := validateKey(key); err != nil {
+		return fmt.Errorf("GIT_KURA_SEAL_KEY is invalid: %w", err)
 	}
 
 	repoRoot, err := gitutil.RepoRoot()

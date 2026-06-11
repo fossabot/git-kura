@@ -1159,6 +1159,18 @@ func TestNormalizeSealPathEscapesRepo(t *testing.T) {
 	}
 }
 
+func TestNormalizeSealPathDotDotPrefixInsideRepo(t *testing.T) {
+	root := t.TempDir()
+	// A file like "..foo/bar" starts with ".." but is inside the repo.
+	path, err := normalizeSealPath(root, filepath.Join(root, "..foo", "bar"))
+	if err != nil {
+		t.Fatalf("unexpected error for path inside repo starting with '..': %v", err)
+	}
+	if path != filepath.Join("..foo", "bar") {
+		t.Fatalf("got %q, want %q", path, filepath.Join("..foo", "bar"))
+	}
+}
+
 func TestNormalizeSealPathRepoRootItself(t *testing.T) {
 	root := t.TempDir()
 	path, err := normalizeSealPath(root, root)
@@ -1237,5 +1249,17 @@ func TestFindKeyForPathNotInAnyStore(t *testing.T) {
 	}
 	if key != "" {
 		t.Fatalf("got %q, want empty", key)
+	}
+}
+
+func TestFindKeyForPathCorruptStoreReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	// Write an invalid JSON file that looks like a store
+	if err := os.WriteFile(filepath.Join(dir, "key1.json"), []byte("not-json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := findKeyForPath(dir, "src/foo.go")
+	if err == nil {
+		t.Fatal("expected error for corrupt store, got nil")
 	}
 }

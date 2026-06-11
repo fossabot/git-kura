@@ -585,6 +585,24 @@ func TestLsShowsOnlyOpenWorktrees(t *testing.T) {
 
 // --- seal add / remove integration tests ---
 
+func TestSealAddRejectsInvalidEnvKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "../../../clobber", "seal", "add", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "invalid")
+}
+
+func TestSealRemoveRejectsInvalidEnvKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "../../../clobber", "seal", "remove", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "invalid")
+}
+
 func TestSealAddRequiresSealKey(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
