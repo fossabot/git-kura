@@ -475,15 +475,7 @@ func TestCmdSealCurrentPrintsKey(t *testing.T) {
 }
 
 func TestCmdSealCurrentFailsWhenUnset(t *testing.T) {
-	prev, had := os.LookupEnv("GIT_KURA_SEAL_KEY")
-	os.Unsetenv("GIT_KURA_SEAL_KEY")
-	t.Cleanup(func() {
-		if had {
-			os.Setenv("GIT_KURA_SEAL_KEY", prev)
-		} else {
-			os.Unsetenv("GIT_KURA_SEAL_KEY")
-		}
-	})
+	t.Setenv("GIT_KURA_SEAL_KEY", "")
 	if err := cmdSealCurrent(); err == nil {
 		t.Fatal("cmdSealCurrent error = nil, want error when GIT_KURA_SEAL_KEY is not set")
 	}
@@ -502,15 +494,7 @@ func TestDetectShellUnix(t *testing.T) {
 	})
 
 	t.Run("falls back to sh when SHELL not set", func(t *testing.T) {
-		prev, had := os.LookupEnv("SHELL")
-		os.Unsetenv("SHELL")
-		t.Cleanup(func() {
-			if had {
-				os.Setenv("SHELL", prev)
-			} else {
-				os.Unsetenv("SHELL")
-			}
-		})
+		t.Setenv("SHELL", "")
 		if got := detectShell(); got != "sh" {
 			t.Fatalf("detectShell() = %q, want sh", got)
 		}

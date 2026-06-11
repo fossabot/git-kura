@@ -354,7 +354,7 @@ func TestCmdSealEnterDefaultShell(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer devNull.Close()
+		defer devNull.Close() //nolint:errcheck
 		oldStdin := os.Stdin
 		os.Stdin = devNull
 		defer func() { os.Stdin = oldStdin }()
