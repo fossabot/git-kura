@@ -1117,3 +1117,125 @@ func TestFormatAge(t *testing.T) {
 		}
 	}
 }
+
+// --- seal path store unit tests ---
+
+func TestNormalizeSealPathAbsolute(t *testing.T) {
+	root := t.TempDir()
+	path, err := normalizeSealPath(root, filepath.Join(root, "src", "foo.go"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != filepath.Join("src", "foo.go") {
+		t.Fatalf("got %q, want %q", path, filepath.Join("src", "foo.go"))
+	}
+}
+
+func TestNormalizeSealPathRelative(t *testing.T) {
+	root := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(old) }()
+
+	path, err := normalizeSealPath(root, "src/foo.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != filepath.Join("src", "foo.go") {
+		t.Fatalf("got %q, want %q", path, filepath.Join("src", "foo.go"))
+	}
+}
+
+func TestNormalizeSealPathEscapesRepo(t *testing.T) {
+	root := t.TempDir()
+	_, err := normalizeSealPath(root, filepath.Join(root, "..", "escape.go"))
+	if err == nil {
+		t.Fatal("expected error for path outside repo, got nil")
+	}
+}
+
+func TestNormalizeSealPathRepoRootItself(t *testing.T) {
+	root := t.TempDir()
+	path, err := normalizeSealPath(root, root)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != "." {
+		t.Fatalf("got %q, want %q", path, ".")
+	}
+}
+
+func TestReadSealPathStoreNotExist(t *testing.T) {
+	store, err := readSealPathStore(filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatalf("expected nil error for missing file, got %v", err)
+	}
+	if len(store.Paths) != 0 {
+		t.Fatalf("expected empty paths, got %v", store.Paths)
+	}
+}
+
+func TestReadWriteSealPathStoreRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "key1.json")
+	original := sealPathStore{
+		SchemaVersion: sealPathSchemaVersion,
+		Key:           "key1",
+		Paths:         []string{"src/a.go", "internal/b.go"},
+	}
+	if err := writeSealPathStore(path, original); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := readSealPathStore(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.Key != original.Key || len(got.Paths) != len(original.Paths) {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", got, original)
+	}
+}
+
+func TestFindKeyForPathNotFound(t *testing.T) {
+	key, err := findKeyForPath(t.TempDir(), "src/foo.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "" {
+		t.Fatalf("got %q, want empty", key)
+	}
+}
+
+func TestFindKeyForPathFindsKey(t *testing.T) {
+	dir := t.TempDir()
+	store := sealPathStore{SchemaVersion: sealPathSchemaVersion, Key: "key1", Paths: []string{"src/foo.go"}}
+	if err := writeSealPathStore(sealPathStoreFile(dir, "key1"), store); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	key, err := findKeyForPath(dir, "src/foo.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "key1" {
+		t.Fatalf("got %q, want %q", key, "key1")
+	}
+}
+
+func TestFindKeyForPathNotInAnyStore(t *testing.T) {
+	dir := t.TempDir()
+	store := sealPathStore{SchemaVersion: sealPathSchemaVersion, Key: "key1", Paths: []string{"src/bar.go"}}
+	if err := writeSealPathStore(sealPathStoreFile(dir, "key1"), store); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	key, err := findKeyForPath(dir, "src/foo.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != "" {
+		t.Fatalf("got %q, want empty", key)
+	}
+}
