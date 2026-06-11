@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -146,10 +147,13 @@ func cmdSealEnter(a sealEnterArgs) error {
 		// Session file can't reflect the child PID.  A dead parent with child_pid=0
 		// looks stale to future seal enter callers even while the child shell runs.
 		// Abort: kill the child so the user can retry with a consistent state.
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		killErr := cmd.Process.Kill()
+		// ExitError after Kill is expected (process exits by signal); surface other errors.
+		if waitErr := cmd.Wait(); waitErr != nil && !errors.As(waitErr, new(*exec.ExitError)) {
+			killErr = errors.Join(killErr, fmt.Errorf("wait for killed child: %w", waitErr))
+		}
 		deleteSealSession(sessPath)
-		return fmt.Errorf("seal enter: record child PID in session: %w", err)
+		return errors.Join(fmt.Errorf("seal enter: record child PID in session: %w", err), killErr)
 	}
 
 	waitErr := cmd.Wait()

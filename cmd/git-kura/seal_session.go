@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,15 +89,18 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 	}
 
 	if err := os.Link(tmpPath, finalPath); err == nil {
-		_ = os.Remove(tmpPath)
+		if removeErr := os.Remove(tmpPath); removeErr != nil {
+			return "", sealSession{}, fmt.Errorf("acquire session: clean up temp file: %w", removeErr)
+		}
 		return finalPath, sess, nil
 	} else if !os.IsExist(err) {
-		_ = os.Remove(tmpPath)
-		return "", sealSession{}, fmt.Errorf("acquire session lock: %w", err)
+		return "", sealSession{}, errors.Join(fmt.Errorf("acquire session lock: %w", err), os.Remove(tmpPath))
 	}
 
 	// finalPath exists — always complete JSON (written via Link or atomic rename).
-	_ = os.Remove(tmpPath)
+	if removeErr := os.Remove(tmpPath); removeErr != nil {
+		return "", sealSession{}, fmt.Errorf("acquire session: clean up temp file: %w", removeErr)
+	}
 	existingData, readErr := os.ReadFile(finalPath)
 	if readErr != nil {
 		return "", sealSession{}, fmt.Errorf("session is locked or unreadable: %w", readErr)
