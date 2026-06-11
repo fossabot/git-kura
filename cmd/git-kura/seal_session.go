@@ -43,11 +43,14 @@ func sealSessionPath(sessDir, worktreePath string) string {
 
 // acquireSealSession atomically acquires a session record for the given worktree.
 //
-// It first writes complete JSON to a temp file, then calls os.Link(tmp, final).
-// Because os.Link is atomic and fails with EEXIST when the target already exists,
-// the final path always contains complete JSON — partial writes are never visible
-// to concurrent callers, which eliminates the corrupt-record race that arises when
-// O_CREATE|O_EXCL is used directly (empty file visible between create and write).
+// It writes complete JSON to a per-PID temp file, then calls os.Link(tmp, final).
+// os.Link is atomic and fails with EEXIST when the target already exists, so the
+// final path always contains complete JSON — partial writes are never visible.
+//
+// Stale sessions (dead PIDs) are NOT removed automatically. Any unconditional
+// removal of finalPath races with concurrent callers that may have linked a new
+// live session between the stale read and the remove call.  The caller must
+// remove the session file manually after verifying it is truly orphaned.
 func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (string, sealSession, error) {
 	if err := os.MkdirAll(sessDir, 0o755); err != nil {
 		return "", sealSession{}, fmt.Errorf("create session store: %w", err)
@@ -62,7 +65,7 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 	}
 
 	finalPath := sealSessionPath(sessDir, worktreePath)
-	// Per-PID temp path: unique so concurrent callers don't clobber each other's writes.
+	// Per-PID temp path so concurrent callers don't clobber each other's writes.
 	tmpPath := finalPath + ".tmp." + strconv.Itoa(parentPID)
 
 	data, _ := json.Marshal(sess)
@@ -70,67 +73,50 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 		return "", sealSession{}, fmt.Errorf("write temp session file: %w", err)
 	}
 
-	for attempt := 0; attempt < 2; attempt++ {
-		// Atomic: succeeds only if finalPath does not yet exist.
-		if err := os.Link(tmpPath, finalPath); err == nil {
-			os.Remove(tmpPath)
-			return finalPath, sess, nil
-		} else if !os.IsExist(err) {
-			os.Remove(tmpPath)
-			return "", sealSession{}, fmt.Errorf("acquire session lock: %w", err)
-		}
-
-		// finalPath already exists — always complete JSON (also written via Link).
-		existingData, readErr := os.ReadFile(finalPath)
-		if readErr != nil {
-			// Unreadable: treat as locked, do not delete.
-			os.Remove(tmpPath)
-			return "", sealSession{}, fmt.Errorf("session is locked or unreadable: %w", readErr)
-		}
-		var existing sealSession
-		if jsonErr := json.Unmarshal(existingData, &existing); jsonErr != nil {
-			// Corrupt: treat as locked, do not delete — caller resolves manually.
-			os.Remove(tmpPath)
-			return "", sealSession{}, fmt.Errorf("session file for this worktree is locked or corrupt; verify state in %s", finalPath)
-		}
-
-		if !sessionAlive(existing) {
-			// Rename to a per-PID tombstone before removing so that the removal is
-			// conditional: only the process that wins the Rename removes the stale
-			// file.  If another process already renamed/removed it, Rename returns
-			// ENOENT — we just retry the Link and either win or find the winner's
-			// live session.  Using os.Remove(finalPath) directly would let a second
-			// process delete the live session that the first process just linked.
-			tombstone := finalPath + ".stale." + strconv.Itoa(parentPID)
-			if err := os.Rename(finalPath, tombstone); err != nil && !os.IsNotExist(err) {
-				os.Remove(tmpPath)
-				return "", sealSession{}, fmt.Errorf("remove stale session: %w", err)
-			}
-			os.Remove(tombstone) // best-effort; harmless if it lingers
-			continue             // retry Link
-		}
-
-		// Active live session: report conflict.
+	if err := os.Link(tmpPath, finalPath); err == nil {
 		os.Remove(tmpPath)
-		age := time.Since(existing.StartedAt).Truncate(time.Second)
-		if existing.Key == key {
-			return "", sealSession{}, fmt.Errorf(
-				"seal session for key %q is already active for this worktree (started %v ago, parent PID %d)",
-				key, age, existing.ParentPID,
-			)
-		}
-		msg := fmt.Sprintf(
-			"worktree %q already has an active seal session for key %q (started %v ago, parent PID %d, child PID %d)",
-			worktreePath, existing.Key, age, existing.ParentPID, existing.ChildPID,
-		)
-		if age > defaultSessionTTL {
-			msg += " [TTL exceeded — may be stale; verify PIDs manually]"
-		}
-		return "", sealSession{}, fmt.Errorf("%s", msg)
+		return finalPath, sess, nil
+	} else if !os.IsExist(err) {
+		os.Remove(tmpPath)
+		return "", sealSession{}, fmt.Errorf("acquire session lock: %w", err)
 	}
 
+	// finalPath exists — always complete JSON (written via Link or atomic rename).
 	os.Remove(tmpPath)
-	return "", sealSession{}, fmt.Errorf("could not acquire session record after retry")
+	existingData, readErr := os.ReadFile(finalPath)
+	if readErr != nil {
+		return "", sealSession{}, fmt.Errorf("session is locked or unreadable: %w", readErr)
+	}
+	var existing sealSession
+	if jsonErr := json.Unmarshal(existingData, &existing); jsonErr != nil {
+		return "", sealSession{}, fmt.Errorf("session file for this worktree is locked or corrupt; verify state in %s", finalPath)
+	}
+
+	age := time.Since(existing.StartedAt).Truncate(time.Second)
+
+	if !sessionAlive(existing) {
+		return "", sealSession{}, fmt.Errorf(
+			"worktree %q has a stale seal session for key %q "+
+				"(started %v ago, parent PID %d and child PID %d appear dead); "+
+				"remove it manually to proceed: %s",
+			worktreePath, existing.Key, age, existing.ParentPID, existing.ChildPID, finalPath,
+		)
+	}
+
+	if existing.Key == key {
+		return "", sealSession{}, fmt.Errorf(
+			"seal session for key %q is already active for this worktree (started %v ago, parent PID %d)",
+			key, age, existing.ParentPID,
+		)
+	}
+	msg := fmt.Sprintf(
+		"worktree %q already has an active seal session for key %q (started %v ago, parent PID %d, child PID %d)",
+		worktreePath, existing.Key, age, existing.ParentPID, existing.ChildPID,
+	)
+	if age > defaultSessionTTL {
+		msg += " [TTL exceeded — may be stale; verify PIDs manually]"
+	}
+	return "", sealSession{}, fmt.Errorf("%s", msg)
 }
 
 // updateSealSession atomically replaces the session file using a temp-then-rename

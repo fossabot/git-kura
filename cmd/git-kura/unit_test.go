@@ -636,7 +636,7 @@ func TestAcquireSealSessionTTLWarning(t *testing.T) {
 	}
 }
 
-func TestAcquireSealSessionStaleCleanup(t *testing.T) {
+func TestAcquireSealSessionStaleReportsError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -650,14 +650,16 @@ func TestAcquireSealSessionStaleCleanup(t *testing.T) {
 	})
 	stalePath := sealSessionPath(dir, "/stale-wt")
 
-	path, _, err := acquireSealSession(dir, "/stale-wt", "key1", os.Getpid())
-	if err != nil {
-		t.Fatalf("stale session caused error: %v", err)
+	_, _, err := acquireSealSession(dir, "/stale-wt", "key1", os.Getpid())
+	if err == nil {
+		t.Fatal("expected stale-session error, got nil")
 	}
-	t.Cleanup(func() { os.Remove(path) })
-
-	// The stale file should have been replaced by the new session file (same path).
-	if _, err := os.Stat(stalePath); err != nil {
-		t.Fatalf("session file should exist after acquiring over stale: %v", err)
+	// Error must include the file path so users know what to delete manually.
+	if !strings.Contains(err.Error(), stalePath) {
+		t.Fatalf("error %q does not contain session file path %q", err.Error(), stalePath)
+	}
+	// Stale file must not have been deleted automatically.
+	if _, statErr := os.Stat(stalePath); statErr != nil {
+		t.Fatalf("stale session file was unexpectedly deleted: %v", statErr)
 	}
 }
