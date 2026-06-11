@@ -551,13 +551,13 @@ func TestAcquireSealSessionDifferentWorktreesDoNotConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire for wt-a error = %v", err)
 	}
-	t.Cleanup(func() { os.Remove(pathA) })
+	t.Cleanup(func() { os.Remove(pathA) }) //nolint:errcheck
 
 	pathB, _, err := acquireSealSession(dirB, "/wt-b", "key2", os.Getpid())
 	if err != nil {
 		t.Fatalf("acquire for wt-b error = %v", err)
 	}
-	t.Cleanup(func() { os.Remove(pathB) })
+	t.Cleanup(func() { os.Remove(pathB) }) //nolint:errcheck
 }
 
 func TestAcquireSealSessionConflictDifferentKey(t *testing.T) {
