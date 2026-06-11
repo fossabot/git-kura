@@ -528,14 +528,14 @@ func deadPIDForTest(t *testing.T) int {
 	return cmd.Process.Pid
 }
 
-// writeSealSessionFile writes a session JSON file directly to sessDir and
-// registers a cleanup to remove it after the test.
+// writeSealSessionFile writes a session JSON file at sealSessionPath(sessDir, sess.WorktreePath)
+// and registers a cleanup to remove it after the test.
 func writeSealSessionFile(t *testing.T, sessDir string, sess sealSession) {
 	t.Helper()
 	if err := os.MkdirAll(sessDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := sealSessionFilePath(sessDir, sess.ParentPID)
+	path := sealSessionPath(sessDir, sess.WorktreePath)
 	data, _ := json.Marshal(sess)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
@@ -543,140 +543,121 @@ func writeSealSessionFile(t *testing.T, sessDir string, sess sealSession) {
 	t.Cleanup(func() { os.Remove(path) })
 }
 
-func TestCheckAndCleanSessionsNoConflict(t *testing.T) {
+func TestAcquireSealSessionSucceeds(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("empty session store succeeds", func(t *testing.T) {
-		if err := checkAndCleanSessions(dir, "/wt", "key1"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
+	path, _, err := acquireSealSession(dir, "/wt-a", "key1", os.Getpid())
+	if err != nil {
+		t.Fatalf("acquireSealSession error = %v, want nil", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
 
-	t.Run("non-existent session dir succeeds", func(t *testing.T) {
-		if err := checkAndCleanSessions(dir+"/nosuchdir", "/wt", "key1"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("session for a different worktree is ignored", func(t *testing.T) {
-		writeSealSessionFile(t, dir, sealSession{
-			Key: "key2", WorktreePath: "/other-wt",
-			ParentPID: os.Getpid(), StartedAt: time.Now(),
-		})
-		if err := checkAndCleanSessions(dir, "/wt", "key1"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("same key same worktree is not a conflict", func(t *testing.T) {
-		writeSealSessionFile(t, dir, sealSession{
-			Key: "key1", WorktreePath: "/same-key-wt",
-			ParentPID: os.Getpid(), StartedAt: time.Now(),
-		})
-		if err := checkAndCleanSessions(dir, "/same-key-wt", "key1"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("session file missing after acquire: %v", err)
+	}
 }
 
-func TestCheckAndCleanSessionsConflict(t *testing.T) {
+func TestAcquireSealSessionDifferentWorktreesDoNotConflict(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Two different session directories (simulating different repos) must not conflict.
+	pathA, _, err := acquireSealSession(dirA, "/wt-a", "key1", os.Getpid())
+	if err != nil {
+		t.Fatalf("acquire for wt-a error = %v", err)
+	}
+	t.Cleanup(func() { os.Remove(pathA) })
+
+	pathB, _, err := acquireSealSession(dirB, "/wt-b", "key2", os.Getpid())
+	if err != nil {
+		t.Fatalf("acquire for wt-b error = %v", err)
+	}
+	t.Cleanup(func() { os.Remove(pathB) })
+}
+
+func TestAcquireSealSessionConflictDifferentKey(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
 
 	dir := t.TempDir()
-
-	t.Run("live session with different key is a conflict", func(t *testing.T) {
-		writeSealSessionFile(t, dir, sealSession{
-			Key: "key2", WorktreePath: "/conflict-wt",
-			ParentPID: os.Getpid(), StartedAt: time.Now(),
-		})
-		err := checkAndCleanSessions(dir, "/conflict-wt", "key1")
-		if err == nil {
-			t.Fatal("expected conflict error, got nil")
-		}
-		if !strings.Contains(err.Error(), "key2") {
-			t.Fatalf("error %q does not mention conflicting key", err.Error())
-		}
+	writeSealSessionFile(t, dir, sealSession{
+		Key: "key2", WorktreePath: "/conflict-wt",
+		ParentPID: os.Getpid(), StartedAt: time.Now(),
 	})
 
-	t.Run("TTL-exceeded live session includes warning in error", func(t *testing.T) {
-		writeSealSessionFile(t, dir, sealSession{
-			Key: "old-key", WorktreePath: "/ttl-wt",
-			ParentPID: os.Getpid(),
-			StartedAt: time.Now().Add(-10 * time.Minute),
-		})
-		err := checkAndCleanSessions(dir, "/ttl-wt", "new-key")
-		if err == nil {
-			t.Fatal("expected conflict error, got nil")
-		}
-		if !strings.Contains(strings.ToLower(err.Error()), "ttl") {
-			t.Fatalf("error %q does not mention TTL", err.Error())
-		}
-	})
+	_, _, err := acquireSealSession(dir, "/conflict-wt", "key1", os.Getpid())
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !strings.Contains(err.Error(), "key2") {
+		t.Fatalf("error %q does not mention conflicting key", err.Error())
+	}
 }
 
-func TestCheckAndCleanSessionsStaleCleanup(t *testing.T) {
+func TestAcquireSealSessionConflictSameKey(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
 
 	dir := t.TempDir()
+	writeSealSessionFile(t, dir, sealSession{
+		Key: "key1", WorktreePath: "/same-key-wt",
+		ParentPID: os.Getpid(), StartedAt: time.Now(),
+	})
 
+	_, _, err := acquireSealSession(dir, "/same-key-wt", "key1", os.Getpid())
+	if err == nil {
+		t.Fatal("expected conflict error for same-key active session, got nil")
+	}
+	if !strings.Contains(err.Error(), "key1") {
+		t.Fatalf("error %q does not mention key", err.Error())
+	}
+}
+
+func TestAcquireSealSessionTTLWarning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	writeSealSessionFile(t, dir, sealSession{
+		Key: "old-key", WorktreePath: "/ttl-wt",
+		ParentPID: os.Getpid(),
+		StartedAt: time.Now().Add(-10 * time.Minute),
+	})
+
+	_, _, err := acquireSealSession(dir, "/ttl-wt", "new-key", os.Getpid())
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "ttl") {
+		t.Fatalf("error %q does not mention TTL", err.Error())
+	}
+}
+
+func TestAcquireSealSessionStaleCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
 	deadPID := deadPIDForTest(t)
-	sessPath := sealSessionFilePath(dir, deadPID)
 
 	writeSealSessionFile(t, dir, sealSession{
 		Key: "key2", WorktreePath: "/stale-wt",
 		ParentPID: deadPID, StartedAt: time.Now(),
 	})
+	stalePath := sealSessionPath(dir, "/stale-wt")
 
-	if err := checkAndCleanSessions(dir, "/stale-wt", "key1"); err != nil {
+	path, _, err := acquireSealSession(dir, "/stale-wt", "key1", os.Getpid())
+	if err != nil {
 		t.Fatalf("stale session caused error: %v", err)
 	}
-
-	if _, err := os.Stat(sessPath); !os.IsNotExist(err) {
-		t.Fatal("stale session file was not removed")
-	}
-}
-
-func TestCreateSealSessionAtomic(t *testing.T) {
-	dir := t.TempDir()
-	sess := sealSession{
-		Key: "key1", WorktreePath: "/wt",
-		ParentPID: os.Getpid(), StartedAt: time.Now(),
-	}
-
-	path, err := createSealSession(dir, sess)
-	if err != nil {
-		t.Fatalf("createSealSession error = %v, want nil", err)
-	}
 	t.Cleanup(func() { os.Remove(path) })
 
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("session file missing after create: %v", err)
-	}
-}
-
-func TestCreateSealSessionFailsWhenAlive(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PID liveness uses kill(0) which is Unix-specific")
-	}
-
-	dir := t.TempDir()
-	sess := sealSession{
-		Key: "key1", WorktreePath: "/wt",
-		ParentPID: os.Getpid(), StartedAt: time.Now(),
-	}
-
-	path, err := createSealSession(dir, sess)
-	if err != nil {
-		t.Fatalf("first create error = %v", err)
-	}
-	t.Cleanup(func() { os.Remove(path) })
-
-	// Second create with same (alive) PID must fail.
-	if _, err := createSealSession(dir, sess); err == nil {
-		t.Fatal("second create with same alive PID error = nil, want error")
+	// The stale file should have been replaced by the new session file (same path).
+	if _, err := os.Stat(stalePath); err != nil {
+		t.Fatalf("session file should exist after acquiring over stale: %v", err)
 	}
 }

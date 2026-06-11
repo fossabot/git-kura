@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"time"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
 )
@@ -116,20 +115,9 @@ func cmdSealEnter(key string, command []string) error {
 		return err
 	}
 
-	if err := checkAndCleanSessions(sessDir, repoRoot, key); err != nil {
-		return err
-	}
-
-	sess := sealSession{
-		Key:          key,
-		WorktreePath: repoRoot,
-		ParentPID:    os.Getpid(),
-		ChildPID:     0,
-		StartedAt:    time.Now(),
-	}
-	sessPath, err := createSealSession(sessDir, sess)
+	sessPath, sess, err := acquireSealSession(sessDir, repoRoot, key, os.Getpid())
 	if err != nil {
-		return fmt.Errorf("seal enter: %w", err)
+		return err
 	}
 
 	var cmd *exec.Cmd
