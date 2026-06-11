@@ -3,8 +3,10 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // In-process command tests cover dispatch and command branches without spawning
@@ -24,6 +26,9 @@ func TestRunHelpAndUsage(t *testing.T) {
 		{name: "open help", args: []string{"open", "--help"}, want: "Usage: git kura open"},
 		{name: "close help", args: []string{"close", "--help"}, want: "Usage: git kura close"},
 		{name: "ls help", args: []string{"ls", "--help"}, want: "Usage: git kura ls"},
+		{name: "seal help (short)", args: []string{"seal", "--help"}, want: "Usage: git kura seal"},
+		{name: "seal enter help", args: []string{"seal", "enter", "--help"}, want: "Usage: git kura seal enter"},
+		{name: "seal current help", args: []string{"seal", "current", "--help"}, want: "Usage: git kura seal current"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := captureStdout(t, func() error {
@@ -37,6 +42,17 @@ func TestRunHelpAndUsage(t *testing.T) {
 			}
 		})
 	}
+
+	// --help after -- must NOT trigger help: the command should fail (command not found or exit)
+	// but must NOT print the seal enter help text.
+	t.Run("seal enter: --help after -- is not help flag", func(t *testing.T) {
+		stdout, _ := captureStdout(t, func() error {
+			return run([]string{"seal", "enter", "key", "--", "--help"})
+		})
+		if strings.Contains(stdout, "Usage: git kura seal enter") {
+			t.Fatalf("stdout = %q: --help after -- must not display seal enter help", stdout)
+		}
+	})
 
 	for _, args := range [][]string{
 		{},
@@ -57,6 +73,12 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"open", "51", "--extra"},
 		{"close", "51", "--extra"},
 		{"ls", "unexpected"},
+		{"seal"},
+		{"seal", "enter"},
+		{"seal", "enter", "key", "extra"},
+		{"seal", "enter", "key", "--"},
+		{"seal", "current", "extra"},
+		{"seal", "unknown"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := run(args); err == nil {
@@ -276,6 +298,125 @@ func TestRunLsIgnoresNonMetadataEntries(t *testing.T) {
 		lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 		if len(lines) != 1 || lines[0] != "51" {
 			t.Fatalf("ls stdout = %q, want only line \"51\"", stdout)
+		}
+	})
+}
+
+func TestRunSealEnterAndCurrentInProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix commands")
+	}
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		// seal enter -- true: covers cmdSealEnter success path + updateSealSession
+		if err := run([]string{"seal", "enter", "key1", "--", "true"}); err != nil {
+			t.Fatalf("seal enter error = %v", err)
+		}
+
+		// seal current via run(): covers runSeal line 71
+		t.Setenv("GIT_KURA_SEAL_KEY", "in-process-key")
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "current"})
+		})
+		if err != nil {
+			t.Fatalf("seal current error = %v", err)
+		}
+		if strings.TrimSpace(stdout) != "in-process-key" {
+			t.Fatalf("seal current stdout = %q, want in-process-key", stdout)
+		}
+
+		// seal enter with conflict: covers cmdSealEnter error-return at line 119-121
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "occupied-key", WorktreePath: repo,
+			ParentPID: os.Getpid(), StartedAt: time.Now(),
+		})
+		if err := run([]string{"seal", "enter", "other-key", "--", "true"}); err == nil {
+			t.Fatal("seal enter with conflict error = nil, want error")
+		}
+	})
+}
+
+func TestCmdSealEnterDefaultShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix shell and /dev/null")
+	}
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		devNull, err := os.Open("/dev/null")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer devNull.Close() //nolint:errcheck
+		oldStdin := os.Stdin
+		os.Stdin = devNull
+		defer func() { os.Stdin = oldStdin }()
+
+		// SHELL="" causes detectShell() to fall back to "sh"; sh exits immediately on /dev/null stdin.
+		t.Setenv("SHELL", "")
+		if err := cmdSealEnter(sealEnterArgs{Key: "key1"}); err != nil {
+			t.Fatalf("cmdSealEnter with default shell error = %v", err)
+		}
+	})
+}
+
+func TestRunCloseErrorPathsInProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix git worktree behavior")
+	}
+
+	t.Run("dirty worktree", func(t *testing.T) {
+		cli := newTestCLI(t)
+		repo := cli.initRepo(t)
+		withWorkingDir(t, repo, func() {
+			if err := run([]string{"open", "52"}); err != nil {
+				t.Fatalf("open error = %v", err)
+			}
+			appendFile(t, filepath.Join(expectedWorktreePath(repo, "52"), "tracked.txt"), "dirty\n")
+			if err := run([]string{"close", "52"}); err == nil {
+				t.Fatal("close dirty worktree error = nil, want error")
+			}
+		})
+	})
+
+	t.Run("unmerged branch", func(t *testing.T) {
+		cli := newTestCLI(t)
+		repo := cli.initRepo(t)
+		withWorkingDir(t, repo, func() {
+			if err := run([]string{"open", "53"}); err != nil {
+				t.Fatalf("open error = %v", err)
+			}
+			wt53 := expectedWorktreePath(repo, "53")
+			writeFile(t, filepath.Join(wt53, "newfile.txt"), "content\n")
+			git(t, wt53, "add", "newfile.txt")
+			git(t, wt53, "commit", "-m", "unmerged commit")
+			if err := run([]string{"close", "53"}); err == nil {
+				t.Fatal("close with unmerged branch error = nil, want error")
+			}
+		})
+	})
+}
+
+func TestOpenDryRunEmptyRepo(t *testing.T) {
+	emptyRepo := t.TempDir()
+	git(t, emptyRepo, "init", "-b", "main")
+	git(t, emptyRepo, "config", "user.email", "test@example.com")
+	git(t, emptyRepo, "config", "user.name", "Test")
+
+	withWorkingDir(t, emptyRepo, func() {
+		err := run([]string{"open", "51", "--dry-run"})
+		if err == nil {
+			t.Fatal("open --dry-run in empty repo error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "base branch") {
+			t.Fatalf("error %q does not mention 'base branch'", err.Error())
 		}
 	})
 }

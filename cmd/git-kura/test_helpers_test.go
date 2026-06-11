@@ -319,6 +319,31 @@ func requireStdoutNotContainsLine(t *testing.T, result cliResult, notWant string
 	}
 }
 
+// gitKuraWithSealKey runs git kura with GIT_KURA_SEAL_KEY set (or unset when sealKey is "").
+func (c *testCLI) gitKuraWithSealKey(dir, sealKey string, args ...string) cliResult {
+	c.t.Helper()
+	env := filterEnv(append(os.Environ(), "PATH="+c.envPath), "GIT_KURA_SEAL_KEY")
+	if sealKey != "" {
+		env = append(env, "GIT_KURA_SEAL_KEY="+sealKey)
+	}
+	cmd := exec.Command("git", append([]string{"kura"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = env
+	return runCommand(cmd)
+}
+
+// filterEnv returns a copy of env with all entries for the given key removed.
+func filterEnv(env []string, key string) []string {
+	prefix := key + "="
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
+}
+
 func requireConformsToOutputSchema(t *testing.T, jsonOutput string) {
 	t.Helper()
 

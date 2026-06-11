@@ -1,8 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Unit tests cover pure parsing and validation helpers without creating Git
@@ -359,4 +365,400 @@ func TestPrintTOONFields(t *testing.T) {
 
 func TestRequireCleanValueStdoutAcceptsWindowsPath(t *testing.T) {
 	requireCleanValueStdout(t, cliResult{stdout: `C:\repo.kura\worktrees\51` + "\n"})
+}
+
+func TestParseSealEnterArgs(t *testing.T) {
+	t.Run("valid key with no command", func(t *testing.T) {
+		a, err := parseSealEnterArgs([]string{"issue-12"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if a.Key != "issue-12" {
+			t.Fatalf("Key = %q, want %q", a.Key, "issue-12")
+		}
+		if len(a.Command) != 0 {
+			t.Fatalf("Command = %v, want empty", a.Command)
+		}
+	})
+
+	t.Run("-- command returns key and command", func(t *testing.T) {
+		a, err := parseSealEnterArgs([]string{"issue-12", "--", "echo", "hi"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if a.Key != "issue-12" {
+			t.Fatalf("Key = %q, want %q", a.Key, "issue-12")
+		}
+		if len(a.Command) != 2 || a.Command[0] != "echo" || a.Command[1] != "hi" {
+			t.Fatalf("Command = %v, want [echo hi]", a.Command)
+		}
+	})
+
+	t.Run("no key is usage error", func(t *testing.T) {
+		_, err := parseSealEnterArgs([]string{})
+		if err == nil {
+			t.Fatal("expected error for missing key, got nil")
+		}
+	})
+
+	t.Run("invalid key is error", func(t *testing.T) {
+		_, err := parseSealEnterArgs([]string{"../x"})
+		if err == nil {
+			t.Fatal("expected error for invalid key, got nil")
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "key") {
+			t.Fatalf("error %q does not mention key", err.Error())
+		}
+	})
+
+	t.Run("extra argument without -- is error", func(t *testing.T) {
+		_, err := parseSealEnterArgs([]string{"issue-12", "extra"})
+		if err == nil {
+			t.Fatal("expected error for extra argument, got nil")
+		}
+	})
+
+	t.Run("-- with no command is error", func(t *testing.T) {
+		_, err := parseSealEnterArgs([]string{"issue-12", "--"})
+		if err == nil {
+			t.Fatal("expected error for -- with no command, got nil")
+		}
+	})
+}
+
+func TestArgsBeforeDoubleDash(t *testing.T) {
+	for _, tc := range []struct {
+		input []string
+		want  []string
+	}{
+		{input: []string{}, want: []string{}},
+		{input: []string{"a", "b"}, want: []string{"a", "b"}},
+		{input: []string{"a", "--", "b"}, want: []string{"a"}},
+		{input: []string{"--", "b"}, want: []string{}},
+		{input: []string{"a", "--", "--help"}, want: []string{"a"}},
+	} {
+		got := argsBeforeDoubleDash(tc.input)
+		if len(got) != len(tc.want) {
+			t.Fatalf("argsBeforeDoubleDash(%v) = %v, want %v", tc.input, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("argsBeforeDoubleDash(%v)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+func TestParseSealCurrentArgs(t *testing.T) {
+	t.Run("no args succeeds", func(t *testing.T) {
+		if err := parseSealCurrentArgs([]string{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("extra argument is error", func(t *testing.T) {
+		if err := parseSealCurrentArgs([]string{"extra"}); err == nil {
+			t.Fatal("expected error for extra argument, got nil")
+		}
+	})
+}
+
+func TestCmdSealCurrentPrintsKey(t *testing.T) {
+	t.Setenv("GIT_KURA_SEAL_KEY", "test-key-123")
+	stdout, err := captureStdout(t, cmdSealCurrent)
+	if err != nil {
+		t.Fatalf("cmdSealCurrent error = %v, want nil", err)
+	}
+	if strings.TrimSpace(stdout) != "test-key-123" {
+		t.Fatalf("stdout = %q, want %q", stdout, "test-key-123")
+	}
+}
+
+func TestCmdSealCurrentFailsWhenUnset(t *testing.T) {
+	t.Setenv("GIT_KURA_SEAL_KEY", "")
+	if err := cmdSealCurrent(); err == nil {
+		t.Fatal("cmdSealCurrent error = nil, want error when GIT_KURA_SEAL_KEY is not set")
+	}
+}
+
+func TestDetectShellUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix shell detection is not tested on Windows")
+	}
+
+	t.Run("uses SHELL env var when set", func(t *testing.T) {
+		t.Setenv("SHELL", "/bin/myshell")
+		if got := detectShell(); got != "/bin/myshell" {
+			t.Fatalf("detectShell() = %q, want %q", got, "/bin/myshell")
+		}
+	})
+
+	t.Run("falls back to sh when SHELL not set", func(t *testing.T) {
+		t.Setenv("SHELL", "")
+		if got := detectShell(); got != "sh" {
+			t.Fatalf("detectShell() = %q, want sh", got)
+		}
+	})
+}
+
+// deadPIDForTest starts a short-lived process and returns its PID after it
+// finishes.  The PID is guaranteed dead for the duration of the test (barring
+// unlikely OS PID reuse).
+func deadPIDForTest(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("deadPIDForTest: %v", err)
+	}
+	return cmd.Process.Pid
+}
+
+// writeSealSessionFile writes a session JSON file at sealSessionPath(sessDir, sess.WorktreePath)
+// and registers a cleanup to remove it after the test.
+func writeSealSessionFile(t *testing.T, sessDir string, sess sealSession) {
+	t.Helper()
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := sealSessionPath(sessDir, sess.WorktreePath)
+	data, _ := json.Marshal(sess)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(path) }) //nolint:errcheck
+}
+
+func TestAcquireSealSessionSucceeds(t *testing.T) {
+	dir := t.TempDir()
+
+	path, _, err := acquireSealSession(dir, "/wt-a", "key1", os.Getpid())
+	if err != nil {
+		t.Fatalf("acquireSealSession error = %v, want nil", err)
+	}
+	t.Cleanup(func() { os.Remove(path) }) //nolint:errcheck
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("session file missing after acquire: %v", err)
+	}
+}
+
+func TestAcquireSealSessionDifferentWorktreesDoNotConflict(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Two different session directories (simulating different repos) must not conflict.
+	pathA, _, err := acquireSealSession(dirA, "/wt-a", "key1", os.Getpid())
+	if err != nil {
+		t.Fatalf("acquire for wt-a error = %v", err)
+	}
+	t.Cleanup(func() { os.Remove(pathA) }) //nolint:errcheck
+
+	pathB, _, err := acquireSealSession(dirB, "/wt-b", "key2", os.Getpid())
+	if err != nil {
+		t.Fatalf("acquire for wt-b error = %v", err)
+	}
+	t.Cleanup(func() { os.Remove(pathB) }) //nolint:errcheck
+}
+
+func TestAcquireSealSessionConflictDifferentKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	writeSealSessionFile(t, dir, sealSession{
+		Key: "key2", WorktreePath: "/conflict-wt",
+		ParentPID: os.Getpid(), StartedAt: time.Now(),
+	})
+
+	_, _, err := acquireSealSession(dir, "/conflict-wt", "key1", os.Getpid())
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !strings.Contains(err.Error(), "key2") {
+		t.Fatalf("error %q does not mention conflicting key", err.Error())
+	}
+}
+
+func TestAcquireSealSessionConflictSameKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	writeSealSessionFile(t, dir, sealSession{
+		Key: "key1", WorktreePath: "/same-key-wt",
+		ParentPID: os.Getpid(), StartedAt: time.Now(),
+	})
+
+	_, _, err := acquireSealSession(dir, "/same-key-wt", "key1", os.Getpid())
+	if err == nil {
+		t.Fatal("expected conflict error for same-key active session, got nil")
+	}
+	if !strings.Contains(err.Error(), "key1") {
+		t.Fatalf("error %q does not mention key", err.Error())
+	}
+}
+
+func TestAcquireSealSessionTTLWarning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	writeSealSessionFile(t, dir, sealSession{
+		Key: "old-key", WorktreePath: "/ttl-wt",
+		ParentPID: os.Getpid(),
+		StartedAt: time.Now().Add(-10 * time.Minute),
+	})
+
+	_, _, err := acquireSealSession(dir, "/ttl-wt", "new-key", os.Getpid())
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "ttl") {
+		t.Fatalf("error %q does not mention TTL", err.Error())
+	}
+}
+
+func TestCmdSealEnterFailsOutsideGitRepo(t *testing.T) {
+	withWorkingDir(t, t.TempDir(), func() {
+		if err := cmdSealEnter(sealEnterArgs{Key: "key1", Command: []string{"true"}}); err == nil {
+			t.Fatal("cmdSealEnter outside git repo error = nil, want error")
+		}
+	})
+}
+
+func TestSessionAliveDeadChild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+	deadPID := deadPIDForTest(t)
+	sess := sealSession{ParentPID: os.Getpid(), ChildPID: deadPID}
+	if sessionAlive(sess) {
+		t.Fatal("sessionAlive = true for dead child PID, want false")
+	}
+}
+
+func TestAcquireSealSessionCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	finalPath := sealSessionPath(dir, "/wt-corrupt")
+	if err := os.WriteFile(finalPath, []byte("not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := acquireSealSession(dir, "/wt-corrupt", "key", os.Getpid())
+	if err == nil {
+		t.Fatal("corrupt session file: error = nil, want error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "corrupt") {
+		t.Fatalf("error %q does not mention 'corrupt'", err.Error())
+	}
+}
+
+func TestPidAliveZeroPid(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific zero-PID test")
+	}
+	if pidAlive(0) {
+		t.Fatal("pidAlive(0) = true, want false")
+	}
+	if pidAlive(-1) {
+		t.Fatal("pidAlive(-1) = true, want false")
+	}
+}
+
+func TestSealSessionDirOutsideRepo(t *testing.T) {
+	_, err := sealSessionDir(t.TempDir())
+	if err == nil {
+		t.Fatal("sealSessionDir outside git repo: error = nil, want error")
+	}
+}
+
+func TestAcquireSealSessionReadFileError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks may require elevated privileges on Windows")
+	}
+	dir := t.TempDir()
+	finalPath := sealSessionPath(dir, "/wt-broken-link")
+	// Broken symlink: directory entry exists (causes EEXIST for Link)
+	// but os.ReadFile follows the symlink and gets an error (target absent).
+	if err := os.Symlink(finalPath+".gone", finalPath); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := acquireSealSession(dir, "/wt-broken-link", "key", os.Getpid())
+	if err == nil {
+		t.Fatal("broken symlink at session path: error = nil, want error")
+	}
+}
+
+func TestAcquireSealSessionMkdirAllFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can always mkdir; skip permission test")
+	}
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(parent, 0o755) }) //nolint:errcheck
+	sessDir := filepath.Join(parent, "sessions")
+	_, _, err := acquireSealSession(sessDir, "/wt", "key", os.Getpid())
+	if err == nil {
+		t.Fatal("MkdirAll in unwritable parent: error = nil, want error")
+	}
+}
+
+func TestAcquireSealSessionWriteTmpFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can always write; skip permission test")
+	}
+	sessDir := t.TempDir()
+	if err := os.Chmod(sessDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(sessDir, 0o755) }) //nolint:errcheck
+	_, _, err := acquireSealSession(sessDir, "/wt", "key", os.Getpid())
+	if err == nil {
+		t.Fatal("WriteFile in non-writable sessDir: error = nil, want error")
+	}
+}
+
+func TestAcquireSealSessionStaleReportsError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	deadPID := deadPIDForTest(t)
+
+	writeSealSessionFile(t, dir, sealSession{
+		Key: "key2", WorktreePath: "/stale-wt",
+		ParentPID: deadPID, StartedAt: time.Now(),
+	})
+	stalePath := sealSessionPath(dir, "/stale-wt")
+
+	_, _, err := acquireSealSession(dir, "/stale-wt", "key1", os.Getpid())
+	if err == nil {
+		t.Fatal("expected stale-session error, got nil")
+	}
+	// Error must include the file path so users know what to delete manually.
+	if !strings.Contains(err.Error(), stalePath) {
+		t.Fatalf("error %q does not contain session file path %q", err.Error(), stalePath)
+	}
+	// Stale file must not have been deleted automatically.
+	if _, statErr := os.Stat(stalePath); statErr != nil {
+		t.Fatalf("stale session file was unexpectedly deleted: %v", statErr)
+	}
+}
+
+func TestUpdateSealSessionRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	// Place a directory at the target path so os.Rename(tmp, path) fails.
+	path := filepath.Join(dir, "session")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sess := sealSession{Key: "key", WorktreePath: "/wt", ParentPID: os.Getpid(), StartedAt: time.Now()}
+	if err := updateSealSession(path, sess); err == nil {
+		t.Fatal("updateSealSession with path=directory: error = nil, want error")
+	}
 }
