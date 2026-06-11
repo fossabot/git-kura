@@ -749,3 +749,16 @@ func TestAcquireSealSessionStaleReportsError(t *testing.T) {
 		t.Fatalf("stale session file was unexpectedly deleted: %v", statErr)
 	}
 }
+
+func TestUpdateSealSessionRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	// Place a directory at the target path so os.Rename(tmp, path) fails.
+	path := filepath.Join(dir, "session")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sess := sealSession{Key: "key", WorktreePath: "/wt", ParentPID: os.Getpid(), StartedAt: time.Now()}
+	if err := updateSealSession(path, sess); err == nil {
+		t.Fatal("updateSealSession with path=directory: error = nil, want error")
+	}
+}

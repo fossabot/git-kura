@@ -89,8 +89,8 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 	}
 
 	if err := os.Link(tmpPath, finalPath); err == nil {
+		// Cleanup failure leaves a per-PID tmp file that is harmless on retry.
 		if removeErr := os.Remove(tmpPath); removeErr != nil {
-			return "", sealSession{}, fmt.Errorf("acquire session: clean up temp file: %w", removeErr)
 		}
 		return finalPath, sess, nil
 	} else if !os.IsExist(err) {
@@ -98,8 +98,8 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 	}
 
 	// finalPath exists — always complete JSON (written via Link or atomic rename).
+	// Cleanup failure leaves a per-PID tmp file that is harmless on retry.
 	if removeErr := os.Remove(tmpPath); removeErr != nil {
-		return "", sealSession{}, fmt.Errorf("acquire session: clean up temp file: %w", removeErr)
 	}
 	existingData, readErr := os.ReadFile(finalPath)
 	if readErr != nil {
