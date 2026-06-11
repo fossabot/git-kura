@@ -95,8 +95,19 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 		}
 
 		if !sessionAlive(existing) {
-			os.Remove(finalPath)
-			continue // stale — retry
+			// Rename to a per-PID tombstone before removing so that the removal is
+			// conditional: only the process that wins the Rename removes the stale
+			// file.  If another process already renamed/removed it, Rename returns
+			// ENOENT — we just retry the Link and either win or find the winner's
+			// live session.  Using os.Remove(finalPath) directly would let a second
+			// process delete the live session that the first process just linked.
+			tombstone := finalPath + ".stale." + strconv.Itoa(parentPID)
+			if err := os.Rename(finalPath, tombstone); err != nil && !os.IsNotExist(err) {
+				os.Remove(tmpPath)
+				return "", sealSession{}, fmt.Errorf("remove stale session: %w", err)
+			}
+			os.Remove(tombstone) // best-effort; harmless if it lingers
+			continue             // retry Link
 		}
 
 		// Active live session: report conflict.
