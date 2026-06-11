@@ -36,7 +36,7 @@ func TestSealCurrentWorksOutsideRepository(t *testing.T) {
 
 func TestSealEnterSetsGitKuraSealKey(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("command-mode seal enter on Windows is covered by the Windows-specific test")
+		t.Skip("TODO: add Windows-specific seal enter test with pwsh/cmd.exe")
 	}
 
 	cli := newTestCLI(t)
@@ -51,7 +51,7 @@ func TestSealEnterSetsGitKuraSealKey(t *testing.T) {
 
 func TestSealEnterWorksOutsideRepository(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("command-mode seal enter on Windows is covered by the Windows-specific test")
+		t.Skip("TODO: add Windows-specific seal enter test with pwsh/cmd.exe")
 	}
 
 	cli := newTestCLI(t)
@@ -65,7 +65,7 @@ func TestSealEnterWorksOutsideRepository(t *testing.T) {
 
 func TestSealEnterOverridesSealKey(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("command-mode seal enter on Windows is covered by the Windows-specific test")
+		t.Skip("TODO: add Windows-specific seal enter test with pwsh/cmd.exe")
 	}
 
 	cli := newTestCLI(t)

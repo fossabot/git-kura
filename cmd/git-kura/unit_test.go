@@ -422,6 +422,29 @@ func TestParseSealEnterArgs(t *testing.T) {
 	})
 }
 
+func TestArgsBeforeDoubleDash(t *testing.T) {
+	for _, tc := range []struct {
+		input []string
+		want  []string
+	}{
+		{input: []string{}, want: []string{}},
+		{input: []string{"a", "b"}, want: []string{"a", "b"}},
+		{input: []string{"a", "--", "b"}, want: []string{"a"}},
+		{input: []string{"--", "b"}, want: []string{}},
+		{input: []string{"a", "--", "--help"}, want: []string{"a"}},
+	} {
+		got := argsBeforeDoubleDash(tc.input)
+		if len(got) != len(tc.want) {
+			t.Fatalf("argsBeforeDoubleDash(%v) = %v, want %v", tc.input, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("argsBeforeDoubleDash(%v)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
 func TestParseSealCurrentArgs(t *testing.T) {
 	t.Run("no args succeeds", func(t *testing.T) {
 		if err := parseSealCurrentArgs([]string{}); err != nil {

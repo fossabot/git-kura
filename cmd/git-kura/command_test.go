@@ -41,6 +41,17 @@ func TestRunHelpAndUsage(t *testing.T) {
 		})
 	}
 
+	// --help after -- must NOT trigger help: the command should fail (command not found or exit)
+	// but must NOT print the seal enter help text.
+	t.Run("seal enter: --help after -- is not help flag", func(t *testing.T) {
+		stdout, _ := captureStdout(t, func() error {
+			return run([]string{"seal", "enter", "key", "--", "--help"})
+		})
+		if strings.Contains(stdout, "Usage: git kura seal enter") {
+			t.Fatalf("stdout = %q: --help after -- must not display seal enter help", stdout)
+		}
+	})
+
 	for _, args := range [][]string{
 		{},
 		{"unknown"},
@@ -63,6 +74,7 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"seal"},
 		{"seal", "enter"},
 		{"seal", "enter", "key", "extra"},
+		{"seal", "enter", "key", "--"},
 		{"seal", "current", "extra"},
 		{"seal", "unknown"},
 	} {

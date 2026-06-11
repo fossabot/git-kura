@@ -30,6 +30,15 @@ const sealCurrentHelp = `Usage: git kura seal current
 Print the value of GIT_KURA_SEAL_KEY.
 Exits with non-zero if GIT_KURA_SEAL_KEY is not set.`
 
+func argsBeforeDoubleDash(args []string) []string {
+	for i, a := range args {
+		if a == "--" {
+			return args[:i]
+		}
+	}
+	return args
+}
+
 func runSeal(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: git kura seal <subcommand> [args]")
@@ -40,7 +49,7 @@ func runSeal(args []string) error {
 		fmt.Println(sealHelp)
 		return nil
 	case "enter":
-		if hasHelpFlag(args[1:]) {
+		if hasHelpFlag(argsBeforeDoubleDash(args[1:])) {
 			fmt.Println(sealEnterHelp)
 			return nil
 		}
