@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
@@ -156,4 +157,111 @@ func sessionAlive(s sealSession) bool {
 		return false
 	}
 	return true
+}
+
+// sessionTTL returns the configured session TTL.
+// It reads GIT_KURA_SESSION_TTL (a Go duration string, e.g. "10m") and falls
+// back to defaultSessionTTL when unset or invalid.
+func sessionTTL() time.Duration {
+	if v := os.Getenv("GIT_KURA_SESSION_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultSessionTTL
+}
+
+const (
+	sessionStatusActive         = "active"
+	sessionStatusStaleCandidate = "stale-candidate (ttl exceeded)"
+	sessionStatusStale          = "stale"
+	sessionStatusUnknown        = "unknown"
+)
+
+// sessionStatusStr classifies a seal session for human display.
+// Priority: dead PIDs → stale; TTL exceeded → stale-candidate; child not yet
+// recorded → unknown; otherwise active.
+func sessionStatusStr(s sealSession, ttl time.Duration) string {
+	if !sessionAlive(s) {
+		return sessionStatusStale
+	}
+	if time.Since(s.StartedAt) > ttl {
+		return sessionStatusStaleCandidate
+	}
+	if s.ChildPID == 0 {
+		return sessionStatusUnknown
+	}
+	return sessionStatusActive
+}
+
+type sealSessionFile struct {
+	Path    string
+	Session sealSession
+	// Err is non-nil when the file could not be read or contains invalid JSON.
+	// A corrupt session file blocks seal enter for its worktree, so callers must
+	// surface it rather than silently ignoring it.
+	Err error
+}
+
+// readAllSealSessions returns all session records (valid and invalid) found in sessDir.
+// Unreadable files are included with Err set to describe the problem; corrupt JSON files
+// are included with Err = "corrupt". Non-existent directory returns nil, nil.
+func readAllSealSessions(sessDir string) ([]sealSessionFile, error) {
+	entries, err := os.ReadDir(sessDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read session dir: %w", err)
+	}
+	var records []sealSessionFile
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(sessDir, entry.Name())
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			records = append(records, sealSessionFile{Path: path, Err: fmt.Errorf("unreadable: %w", readErr)})
+			continue
+		}
+		var sess sealSession
+		if jsonErr := json.Unmarshal(data, &sess); jsonErr != nil {
+			records = append(records, sealSessionFile{Path: path, Err: fmt.Errorf("corrupt")})
+			continue
+		}
+		records = append(records, sealSessionFile{Path: path, Session: sess})
+	}
+	return records, nil
+}
+
+// removeStaleSession removes path only when it still contains the same stale session
+// that was read earlier. It re-reads and re-checks liveness immediately before removal
+// to prevent deleting a live session that raced into the same path after the initial scan.
+// Returns (true, nil) if removed, (false, nil) if skipped, or (false, err) on I/O failure.
+func removeStaleSession(path string, original sealSession) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("re-read session before removal: %w", err)
+	}
+	var current sealSession
+	if err := json.Unmarshal(data, &current); err != nil {
+		// File is now corrupt; leave it for manual inspection
+		return false, nil
+	}
+	// A different session was created at this path since the initial scan
+	if !current.StartedAt.Equal(original.StartedAt) {
+		return false, nil
+	}
+	// Re-check liveness — the session might have been restarted
+	if sessionAlive(current) {
+		return false, nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("remove stale session: %w", err)
+	}
+	return true, nil
 }

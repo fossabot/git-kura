@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"text/tabwriter"
+	"time"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
 	"github.com/tooppoo/git-kura/internal/worktree"
@@ -18,8 +20,28 @@ Manage the current seal key for the active session.
 Subcommands:
   enter <key> [-- <command...>]  Start a child shell with GIT_KURA_SEAL_KEY=<key>
   current                        Print the current seal key (GIT_KURA_SEAL_KEY)
+  ls                             List all recorded seal sessions
+  release                        Remove stale seal sessions
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
+
+const sealLsHelp = `Usage: git kura seal ls
+
+List all recorded seal sessions for this repository.
+
+Displays key, worktree path, parent PID, child PID, age, and status.
+Sessions whose PIDs are dead are shown as stale.
+Sessions exceeding the TTL but with live PIDs are shown as stale-candidate.
+
+TTL is configured via GIT_KURA_SESSION_TTL (e.g. "10m"). Default: 5m.`
+
+const sealReleaseHelp = `Usage: git kura seal release
+
+Remove stale seal sessions from this repository.
+
+A session is removed only when its parent and child PIDs are confirmed dead.
+TTL-exceeded sessions are NOT removed unless their PIDs are also dead.
+Sessions with unknown liveness are never removed.`
 
 const sealEnterHelp = `Usage: git kura seal enter <key> [-- <command...>]
 
@@ -76,9 +98,134 @@ func runSeal(args []string) error {
 			return err
 		}
 		return cmdSealCurrent()
+	case "ls":
+		if hasHelpFlag(args[1:]) {
+			fmt.Println(sealLsHelp)
+			return nil
+		}
+		if len(args) > 1 {
+			return fmt.Errorf("usage: git kura seal ls: unexpected argument %q", args[1])
+		}
+		return cmdSealLs()
+	case "release":
+		if hasHelpFlag(args[1:]) {
+			fmt.Println(sealReleaseHelp)
+			return nil
+		}
+		if len(args) > 1 {
+			return fmt.Errorf("usage: git kura seal release: unexpected argument %q", args[1])
+		}
+		return cmdSealRelease()
 	default:
 		return fmt.Errorf("unknown seal subcommand: %s", args[0])
 	}
+}
+
+func cmdSealLs() error {
+	repoRoot, err := gitutil.RepoRoot()
+	if err != nil {
+		return fmt.Errorf("not inside a git repository")
+	}
+	sessDir, err := sealSessionDir(repoRoot)
+	if err != nil {
+		return err
+	}
+	records, err := readAllSealSessions(sessDir)
+	if err != nil {
+		return err
+	}
+
+	ttl := sessionTTL()
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(w, "key\tworktree\tparent\tchild\tage\tstatus"); err != nil {
+		return err
+	}
+	for _, r := range records {
+		if r.Err != nil {
+			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				"(unknown)", r.Path, "-", "-", "-", r.Err.Error(),
+			); err != nil {
+				return err
+			}
+			continue
+		}
+		age := time.Since(r.Session.StartedAt).Truncate(time.Second)
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\t%s\n",
+			r.Session.Key,
+			r.Session.WorktreePath,
+			r.Session.ParentPID,
+			r.Session.ChildPID,
+			formatAge(age),
+			sessionStatusStr(r.Session, ttl),
+		); err != nil {
+			return err
+		}
+	}
+	return w.Flush()
+}
+
+func cmdSealRelease() error {
+	repoRoot, err := gitutil.RepoRoot()
+	if err != nil {
+		return fmt.Errorf("not inside a git repository")
+	}
+	sessDir, err := sealSessionDir(repoRoot)
+	if err != nil {
+		return err
+	}
+	records, err := readAllSealSessions(sessDir)
+	if err != nil {
+		return err
+	}
+
+	var stale, corrupt []sealSessionFile
+	for _, r := range records {
+		switch {
+		case r.Err != nil:
+			corrupt = append(corrupt, r)
+		case !sessionAlive(r.Session):
+			stale = append(stale, r)
+		}
+	}
+
+	var errs []error
+	removed := 0
+
+	if len(stale) == 0 {
+		fmt.Println("No stale sessions found.")
+	} else {
+		fmt.Println("Removing stale sessions:")
+		for _, r := range stale {
+			age := time.Since(r.Session.StartedAt).Truncate(time.Second)
+			fmt.Printf("  %s (key: %s, age: %s)\n", r.Path, r.Session.Key, formatAge(age))
+			ok, removeErr := removeStaleSession(r.Path, r.Session)
+			if removeErr != nil {
+				errs = append(errs, removeErr)
+			} else if ok {
+				removed++
+			}
+		}
+		fmt.Printf("Removed %d stale session(s).\n", removed)
+	}
+
+	if len(corrupt) > 0 {
+		fmt.Println("Warning: corrupt or unreadable session file(s) skipped — inspect manually:")
+		for _, r := range corrupt {
+			fmt.Printf("  %s\n", r.Path)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func formatAge(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
 func parseSealEnterArgs(args []string) (sealEnterArgs, error) {

@@ -762,3 +762,358 @@ func TestUpdateSealSessionRenameFails(t *testing.T) {
 		t.Fatal("updateSealSession with path=directory: error = nil, want error")
 	}
 }
+
+func TestSessionStatusStr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	ttl := 5 * time.Minute
+
+	t.Run("active when pids alive and within ttl", func(t *testing.T) {
+		sess := sealSession{ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: time.Now()}
+		if got := sessionStatusStr(sess, ttl); got != sessionStatusActive {
+			t.Fatalf("sessionStatusStr = %q, want %q", got, sessionStatusActive)
+		}
+	})
+
+	t.Run("stale-candidate when pids alive but ttl exceeded", func(t *testing.T) {
+		sess := sealSession{
+			ParentPID: os.Getpid(), ChildPID: os.Getpid(),
+			StartedAt: time.Now().Add(-10 * time.Minute),
+		}
+		if got := sessionStatusStr(sess, ttl); got != sessionStatusStaleCandidate {
+			t.Fatalf("sessionStatusStr = %q, want %q", got, sessionStatusStaleCandidate)
+		}
+	})
+
+	t.Run("stale when parent pid dead", func(t *testing.T) {
+		dead := deadPIDForTest(t)
+		sess := sealSession{ParentPID: dead, StartedAt: time.Now()}
+		if got := sessionStatusStr(sess, ttl); got != sessionStatusStale {
+			t.Fatalf("sessionStatusStr = %q, want %q", got, sessionStatusStale)
+		}
+	})
+
+	t.Run("unknown when child pid not yet recorded", func(t *testing.T) {
+		sess := sealSession{ParentPID: os.Getpid(), ChildPID: 0, StartedAt: time.Now()}
+		if got := sessionStatusStr(sess, ttl); got != sessionStatusUnknown {
+			t.Fatalf("sessionStatusStr = %q, want %q", got, sessionStatusUnknown)
+		}
+	})
+}
+
+func TestSessionTTLEnvVar(t *testing.T) {
+	t.Run("valid duration is used", func(t *testing.T) {
+		t.Setenv("GIT_KURA_SESSION_TTL", "10m")
+		if got := sessionTTL(); got != 10*time.Minute {
+			t.Fatalf("sessionTTL() = %v, want 10m", got)
+		}
+	})
+
+	t.Run("invalid duration falls back to default", func(t *testing.T) {
+		t.Setenv("GIT_KURA_SESSION_TTL", "notaduration")
+		if got := sessionTTL(); got != defaultSessionTTL {
+			t.Fatalf("sessionTTL() = %v, want %v (default)", got, defaultSessionTTL)
+		}
+	})
+
+	t.Run("unset falls back to default", func(t *testing.T) {
+		t.Setenv("GIT_KURA_SESSION_TTL", "")
+		if got := sessionTTL(); got != defaultSessionTTL {
+			t.Fatalf("sessionTTL() = %v, want %v (default)", got, defaultSessionTTL)
+		}
+	})
+
+	t.Run("zero duration falls back to default", func(t *testing.T) {
+		t.Setenv("GIT_KURA_SESSION_TTL", "0s")
+		if got := sessionTTL(); got != defaultSessionTTL {
+			t.Fatalf("sessionTTL() = %v, want %v (default)", got, defaultSessionTTL)
+		}
+	})
+}
+
+func TestReadAllSealSessionsNonExistentDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nonexistent")
+	records, err := readAllSealSessions(dir)
+	if err != nil {
+		t.Fatalf("readAllSealSessions non-existent dir error = %v, want nil", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("len(records) = %d, want 0", len(records))
+	}
+}
+
+func TestReadAllSealSessionsEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	records, err := readAllSealSessions(dir)
+	if err != nil {
+		t.Fatalf("readAllSealSessions empty dir error = %v, want nil", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("len(records) = %d, want 0", len(records))
+	}
+}
+
+func TestReadAllSealSessionsReadDirError(t *testing.T) {
+	parent := t.TempDir()
+	sessDir := filepath.Join(parent, "sessions")
+	// Place a regular file at sessDir so os.ReadDir fails with a non-NotExist error
+	if err := os.WriteFile(sessDir, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readAllSealSessions(sessDir)
+	if err == nil {
+		t.Fatal("readAllSealSessions(file instead of dir) error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "read session dir") {
+		t.Fatalf("error %q does not mention 'read session dir'", err.Error())
+	}
+}
+
+func TestReadAllSealSessionsSkipsNonJSONEntries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "metadata.txt"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readAllSealSessions(dir)
+	if err != nil {
+		t.Fatalf("readAllSealSessions error = %v, want nil", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("len(records) = %d, want 0 (non-JSON and dir skipped)", len(records))
+	}
+}
+
+func TestReadAllSealSessionsIncludesUnreadableAsError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can always read; skip permission test")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unreadable.json")
+	if err := os.WriteFile(path, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o644) }) //nolint:errcheck
+
+	records, err := readAllSealSessions(dir)
+	if err != nil {
+		t.Fatalf("readAllSealSessions error = %v, want nil", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1 (unreadable file included as error)", len(records))
+	}
+	if records[0].Err == nil {
+		t.Fatal("unreadable record Err = nil, want non-nil")
+	}
+	if !strings.Contains(records[0].Err.Error(), "unreadable") {
+		t.Fatalf("Err = %q, want it to contain 'unreadable'", records[0].Err.Error())
+	}
+}
+
+func TestReadAllSealSessionsWithSession(t *testing.T) {
+	dir := t.TempDir()
+	sess := sealSession{Key: "test-key", WorktreePath: "/wt", ParentPID: os.Getpid(), StartedAt: time.Now()}
+	writeSealSessionFile(t, dir, sess)
+
+	records, err := readAllSealSessions(dir)
+	if err != nil {
+		t.Fatalf("readAllSealSessions error = %v, want nil", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if records[0].Session.Key != "test-key" {
+		t.Fatalf("Session.Key = %q, want %q", records[0].Session.Key, "test-key")
+	}
+}
+
+func TestReadAllSealSessionsIncludesCorruptAsError(t *testing.T) {
+	dir := t.TempDir()
+	corruptPath := filepath.Join(dir, "corrupt.json")
+	if err := os.WriteFile(corruptPath, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	valid := sealSession{Key: "valid", WorktreePath: "/wt-valid", ParentPID: os.Getpid(), StartedAt: time.Now()}
+	writeSealSessionFile(t, dir, valid)
+
+	records, err := readAllSealSessions(dir)
+	if err != nil {
+		t.Fatalf("readAllSealSessions error = %v, want nil", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("len(records) = %d, want 2 (valid + corrupt)", len(records))
+	}
+
+	var foundValid, foundCorrupt bool
+	for _, r := range records {
+		if r.Err == nil && r.Session.Key == "valid" {
+			foundValid = true
+		}
+		if r.Err != nil && r.Path == corruptPath {
+			foundCorrupt = true
+			if !strings.Contains(r.Err.Error(), "corrupt") {
+				t.Fatalf("corrupt record Err = %q, want it to contain 'corrupt'", r.Err.Error())
+			}
+		}
+	}
+	if !foundValid {
+		t.Fatal("valid session not found in records")
+	}
+	if !foundCorrupt {
+		t.Fatal("corrupt session not found in records")
+	}
+}
+
+func TestRemoveStaleSessionFileGone(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gone.json")
+	sess := sealSession{Key: "k", WorktreePath: "/wt", ParentPID: 999, StartedAt: time.Now()}
+
+	ok, err := removeStaleSession(path, sess)
+	if err != nil {
+		t.Fatalf("removeStaleSession (file gone) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("removeStaleSession (file gone) removed = true, want false")
+	}
+}
+
+func TestRemoveStaleSessionStartedAtChanged(t *testing.T) {
+	dir := t.TempDir()
+	original := sealSession{Key: "k", WorktreePath: "/wt", ParentPID: 1, StartedAt: time.Now().Add(-1 * time.Minute)}
+	newer := sealSession{Key: "k2", WorktreePath: "/wt", ParentPID: os.Getpid(), StartedAt: time.Now()}
+	writeSealSessionFile(t, dir, newer)
+	path := sealSessionPath(dir, "/wt")
+
+	ok, err := removeStaleSession(path, original)
+	if err != nil {
+		t.Fatalf("removeStaleSession (startedAt changed) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("removeStaleSession (startedAt changed) removed = true, want false (live session protected)")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("live session was unexpectedly deleted: %v", statErr)
+	}
+}
+
+func TestRemoveStaleSessionNowCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	original := sealSession{Key: "k", WorktreePath: "/wt", ParentPID: 1, StartedAt: time.Now()}
+	path := sealSessionPath(dir, "/wt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := removeStaleSession(path, original)
+	if err != nil {
+		t.Fatalf("removeStaleSession (now corrupt) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("removeStaleSession (now corrupt) removed = true, want false (corrupt left for manual inspection)")
+	}
+}
+
+func TestRemoveStaleSessionNowAlive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	startedAt := time.Now()
+	dead := deadPIDForTest(t)
+	// original had a dead PID; a live session with the same StartedAt now occupies the path
+	original := sealSession{Key: "k", WorktreePath: "/wt-race", ParentPID: dead, StartedAt: startedAt}
+	current := sealSession{Key: "k", WorktreePath: "/wt-race", ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: startedAt}
+	writeSealSessionFile(t, dir, current)
+	path := sealSessionPath(dir, "/wt-race")
+
+	ok, err := removeStaleSession(path, original)
+	if err != nil {
+		t.Fatalf("removeStaleSession (now alive) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("removeStaleSession (now alive) removed = true, want false (live session protected)")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("live session was unexpectedly deleted: %v", statErr)
+	}
+}
+
+func TestRemoveStaleSessionReadError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can always read; skip permission test")
+	}
+
+	dir := t.TempDir()
+	original := sealSession{Key: "k", WorktreePath: "/wt-noperm", ParentPID: 1, StartedAt: time.Now()}
+	path := sealSessionPath(dir, "/wt-noperm")
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o644) }) //nolint:errcheck
+
+	_, err := removeStaleSession(path, original)
+	if err == nil {
+		t.Fatal("removeStaleSession (unreadable) error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "re-read session") {
+		t.Fatalf("error %q does not mention 're-read session'", err.Error())
+	}
+}
+
+func TestRemoveStaleSessionStillStale(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	dead := deadPIDForTest(t)
+	sess := sealSession{Key: "k", WorktreePath: "/wt-stale", ParentPID: dead, StartedAt: time.Now()}
+	writeSealSessionFile(t, dir, sess)
+	path := sealSessionPath(dir, "/wt-stale")
+
+	ok, err := removeStaleSession(path, sess)
+	if err != nil {
+		t.Fatalf("removeStaleSession (still stale) error = %v, want nil", err)
+	}
+	if !ok {
+		t.Fatal("removeStaleSession (still stale) removed = false, want true")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("stale session not deleted (stat err = %v)", statErr)
+	}
+}
+
+func TestFormatAge(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{30 * time.Second, "30s"},
+		{59 * time.Second, "59s"},
+		{time.Minute, "1m"},
+		{5 * time.Minute, "5m"},
+		{59 * time.Minute, "59m"},
+		{time.Hour, "1h"},
+		{2*time.Hour + 30*time.Minute, "2h"},
+	} {
+		if got := formatAge(tc.d); got != tc.want {
+			t.Errorf("formatAge(%v) = %q, want %q", tc.d, got, tc.want)
+		}
+	}
+}
