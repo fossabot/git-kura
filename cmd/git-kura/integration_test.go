@@ -40,16 +40,15 @@ func TestSealEnterSetsGitKuraSealKey(t *testing.T) {
 	}
 
 	cli := newTestCLI(t)
-	dir := t.TempDir()
+	repo := cli.initRepo(t)
 
-	// Use -- mode: run `git kura seal current` inside the sealed context
-	result := cli.gitKuraWithSealKey(dir, "",
+	result := cli.gitKuraWithSealKey(repo, "",
 		"seal", "enter", "test-key", "--", "git", "kura", "seal", "current")
 	requireExitCode(t, result, 0)
 	requireStdoutLine(t, result, "test-key")
 }
 
-func TestSealEnterWorksOutsideRepository(t *testing.T) {
+func TestSealEnterFailsOutsideRepository(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("TODO: add Windows-specific seal enter test with pwsh/cmd.exe")
 	}
@@ -59,8 +58,9 @@ func TestSealEnterWorksOutsideRepository(t *testing.T) {
 
 	result := cli.gitKuraWithSealKey(outside, "",
 		"seal", "enter", "outside-key", "--", "git", "kura", "seal", "current")
-	requireExitCode(t, result, 0)
-	requireStdoutLine(t, result, "outside-key")
+	requireNonZeroExitCode(t, result)
+	requireEmptyStdout(t, result)
+	requireStderrContains(t, result, "repository")
 }
 
 func TestSealEnterOverridesSealKey(t *testing.T) {
@@ -69,13 +69,46 @@ func TestSealEnterOverridesSealKey(t *testing.T) {
 	}
 
 	cli := newTestCLI(t)
-	dir := t.TempDir()
+	repo := cli.initRepo(t)
 
-	// Even if GIT_KURA_SEAL_KEY is already set, enter overrides it in the child
-	result := cli.gitKuraWithSealKey(dir, "old-key",
+	// Even if GIT_KURA_SEAL_KEY is already set in the parent, enter overrides it.
+	result := cli.gitKuraWithSealKey(repo, "old-key",
 		"seal", "enter", "new-key", "--", "git", "kura", "seal", "current")
 	requireExitCode(t, result, 0)
 	requireStdoutLine(t, result, "new-key")
+}
+
+func TestSealEnterSessionGuardRejectsDifferentKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("TODO: add Windows-specific seal enter test with pwsh/cmd.exe")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// Outer enter holds key1; inner enter with key2 must be rejected.
+	result := cli.gitKuraWithSealKey(repo, "",
+		"seal", "enter", "key1", "--",
+		"git", "kura", "seal", "enter", "key2", "--", "echo", "inner")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "key1")
+}
+
+func TestSealEnterSessionCleanupAfterExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("TODO: add Windows-specific seal enter test with pwsh/cmd.exe")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// First enter exits normally.
+	first := cli.gitKuraWithSealKey(repo, "", "seal", "enter", "key1", "--", "true")
+	requireExitCode(t, first, 0)
+
+	// Session cleaned up: second enter with a different key must succeed.
+	second := cli.gitKuraWithSealKey(repo, "", "seal", "enter", "key2", "--", "true")
+	requireExitCode(t, second, 0)
 }
 
 // Integration tests exercise the git-kura binary through Git's subcommand

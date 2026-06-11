@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Unit tests cover pure parsing and validation helpers without creating Git
@@ -511,4 +514,169 @@ func TestDetectShellUnix(t *testing.T) {
 			t.Fatalf("detectShell() = %q, want sh", got)
 		}
 	})
+}
+
+// deadPIDForTest starts a short-lived process and returns its PID after it
+// finishes.  The PID is guaranteed dead for the duration of the test (barring
+// unlikely OS PID reuse).
+func deadPIDForTest(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("deadPIDForTest: %v", err)
+	}
+	return cmd.Process.Pid
+}
+
+// writeSealSessionFile writes a session JSON file directly to sessDir and
+// registers a cleanup to remove it after the test.
+func writeSealSessionFile(t *testing.T, sessDir string, sess sealSession) {
+	t.Helper()
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := sealSessionFilePath(sessDir, sess.ParentPID)
+	data, _ := json.Marshal(sess)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+}
+
+func TestCheckAndCleanSessionsNoConflict(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("empty session store succeeds", func(t *testing.T) {
+		if err := checkAndCleanSessions(dir, "/wt", "key1"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("non-existent session dir succeeds", func(t *testing.T) {
+		if err := checkAndCleanSessions(dir+"/nosuchdir", "/wt", "key1"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("session for a different worktree is ignored", func(t *testing.T) {
+		writeSealSessionFile(t, dir, sealSession{
+			Key: "key2", WorktreePath: "/other-wt",
+			ParentPID: os.Getpid(), StartedAt: time.Now(),
+		})
+		if err := checkAndCleanSessions(dir, "/wt", "key1"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("same key same worktree is not a conflict", func(t *testing.T) {
+		writeSealSessionFile(t, dir, sealSession{
+			Key: "key1", WorktreePath: "/same-key-wt",
+			ParentPID: os.Getpid(), StartedAt: time.Now(),
+		})
+		if err := checkAndCleanSessions(dir, "/same-key-wt", "key1"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestCheckAndCleanSessionsConflict(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+
+	t.Run("live session with different key is a conflict", func(t *testing.T) {
+		writeSealSessionFile(t, dir, sealSession{
+			Key: "key2", WorktreePath: "/conflict-wt",
+			ParentPID: os.Getpid(), StartedAt: time.Now(),
+		})
+		err := checkAndCleanSessions(dir, "/conflict-wt", "key1")
+		if err == nil {
+			t.Fatal("expected conflict error, got nil")
+		}
+		if !strings.Contains(err.Error(), "key2") {
+			t.Fatalf("error %q does not mention conflicting key", err.Error())
+		}
+	})
+
+	t.Run("TTL-exceeded live session includes warning in error", func(t *testing.T) {
+		writeSealSessionFile(t, dir, sealSession{
+			Key: "old-key", WorktreePath: "/ttl-wt",
+			ParentPID: os.Getpid(),
+			StartedAt: time.Now().Add(-10 * time.Minute),
+		})
+		err := checkAndCleanSessions(dir, "/ttl-wt", "new-key")
+		if err == nil {
+			t.Fatal("expected conflict error, got nil")
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "ttl") {
+			t.Fatalf("error %q does not mention TTL", err.Error())
+		}
+	})
+}
+
+func TestCheckAndCleanSessionsStaleCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+
+	deadPID := deadPIDForTest(t)
+	sessPath := sealSessionFilePath(dir, deadPID)
+
+	writeSealSessionFile(t, dir, sealSession{
+		Key: "key2", WorktreePath: "/stale-wt",
+		ParentPID: deadPID, StartedAt: time.Now(),
+	})
+
+	if err := checkAndCleanSessions(dir, "/stale-wt", "key1"); err != nil {
+		t.Fatalf("stale session caused error: %v", err)
+	}
+
+	if _, err := os.Stat(sessPath); !os.IsNotExist(err) {
+		t.Fatal("stale session file was not removed")
+	}
+}
+
+func TestCreateSealSessionAtomic(t *testing.T) {
+	dir := t.TempDir()
+	sess := sealSession{
+		Key: "key1", WorktreePath: "/wt",
+		ParentPID: os.Getpid(), StartedAt: time.Now(),
+	}
+
+	path, err := createSealSession(dir, sess)
+	if err != nil {
+		t.Fatalf("createSealSession error = %v, want nil", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("session file missing after create: %v", err)
+	}
+}
+
+func TestCreateSealSessionFailsWhenAlive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	sess := sealSession{
+		Key: "key1", WorktreePath: "/wt",
+		ParentPID: os.Getpid(), StartedAt: time.Now(),
+	}
+
+	path, err := createSealSession(dir, sess)
+	if err != nil {
+		t.Fatalf("first create error = %v", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	// Second create with same (alive) PID must fail.
+	if _, err := createSealSession(dir, sess); err == nil {
+		t.Fatal("second create with same alive PID error = nil, want error")
+	}
 }

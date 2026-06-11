@@ -5,6 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"time"
+
+	"github.com/tooppoo/git-kura/internal/gitutil"
 )
 
 const sealHelp = `Usage: git kura seal <subcommand> [args]
@@ -103,6 +106,32 @@ func parseSealCurrentArgs(args []string) error {
 }
 
 func cmdSealEnter(key string, command []string) error {
+	repoRoot, err := gitutil.RepoRoot()
+	if err != nil {
+		return fmt.Errorf("not inside a git repository")
+	}
+
+	sessDir, err := sealSessionDir(repoRoot)
+	if err != nil {
+		return err
+	}
+
+	if err := checkAndCleanSessions(sessDir, repoRoot, key); err != nil {
+		return err
+	}
+
+	sess := sealSession{
+		Key:          key,
+		WorktreePath: repoRoot,
+		ParentPID:    os.Getpid(),
+		ChildPID:     0,
+		StartedAt:    time.Now(),
+	}
+	sessPath, err := createSealSession(sessDir, sess)
+	if err != nil {
+		return fmt.Errorf("seal enter: %w", err)
+	}
+
 	var cmd *exec.Cmd
 	if len(command) > 0 {
 		cmd = exec.Command(command[0], command[1:]...)
@@ -113,11 +142,23 @@ func cmdSealEnter(key string, command []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "GIT_KURA_SEAL_KEY="+key)
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+
+	if err := cmd.Start(); err != nil {
+		deleteSealSession(sessPath)
+		return fmt.Errorf("seal enter: %w", err)
+	}
+
+	sess.ChildPID = cmd.Process.Pid
+	_ = updateSealSession(sessPath, sess)
+
+	waitErr := cmd.Wait()
+	deleteSealSession(sessPath)
+
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			os.Exit(exitErr.ExitCode())
 		}
-		return fmt.Errorf("seal enter: %w", err)
+		return fmt.Errorf("seal enter: %w", waitErr)
 	}
 	return nil
 }
