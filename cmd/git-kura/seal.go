@@ -20,21 +20,12 @@ Manage the current seal key for the active session.
 Subcommands:
   enter <key> [-- <command...>]  Start a child shell with GIT_KURA_SEAL_KEY=<key>
   current                        Print the current seal key (GIT_KURA_SEAL_KEY)
-  session <subcommand>           Manage seal session records
+  ls                             List all recorded seal sessions
+  release                        Remove stale seal sessions
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
-const sealSessionHelp = `Usage: git kura seal session <subcommand>
-
-Manage seal session records for this repository.
-
-Subcommands:
-  ls     List all recorded seal sessions
-  clean  Remove stale seal sessions
-
-Run "git kura seal session <subcommand> --help" for subcommand-specific help.`
-
-const sealSessionLsHelp = `Usage: git kura seal session ls
+const sealLsHelp = `Usage: git kura seal ls
 
 List all recorded seal sessions for this repository.
 
@@ -44,7 +35,7 @@ Sessions exceeding the TTL but with live PIDs are shown as stale-candidate.
 
 TTL is configured via GIT_KURA_SESSION_TTL (e.g. "10m"). Default: 5m.`
 
-const sealSessionCleanHelp = `Usage: git kura seal session clean
+const sealReleaseHelp = `Usage: git kura seal release
 
 Remove stale seal sessions from this repository.
 
@@ -107,45 +98,30 @@ func runSeal(args []string) error {
 			return err
 		}
 		return cmdSealCurrent()
-	case "session":
-		return runSealSession(args[1:])
+	case "ls":
+		if hasHelpFlag(args[1:]) {
+			fmt.Println(sealLsHelp)
+			return nil
+		}
+		if len(args) > 1 {
+			return fmt.Errorf("usage: git kura seal ls: unexpected argument %q", args[1])
+		}
+		return cmdSealLs()
+	case "release":
+		if hasHelpFlag(args[1:]) {
+			fmt.Println(sealReleaseHelp)
+			return nil
+		}
+		if len(args) > 1 {
+			return fmt.Errorf("usage: git kura seal release: unexpected argument %q", args[1])
+		}
+		return cmdSealRelease()
 	default:
 		return fmt.Errorf("unknown seal subcommand: %s", args[0])
 	}
 }
 
-func runSealSession(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: git kura seal session <subcommand> [args]")
-	}
-	switch args[0] {
-	case "-h", "--help":
-		fmt.Println(sealSessionHelp)
-		return nil
-	case "ls":
-		if hasHelpFlag(args[1:]) {
-			fmt.Println(sealSessionLsHelp)
-			return nil
-		}
-		if len(args) > 1 {
-			return fmt.Errorf("usage: git kura seal session ls: unexpected argument %q", args[1])
-		}
-		return cmdSealSessionLs()
-	case "clean":
-		if hasHelpFlag(args[1:]) {
-			fmt.Println(sealSessionCleanHelp)
-			return nil
-		}
-		if len(args) > 1 {
-			return fmt.Errorf("usage: git kura seal session clean: unexpected argument %q", args[1])
-		}
-		return cmdSealSessionClean()
-	default:
-		return fmt.Errorf("unknown seal session subcommand: %s", args[0])
-	}
-}
-
-func cmdSealSessionLs() error {
+func cmdSealLs() error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
@@ -188,7 +164,7 @@ func cmdSealSessionLs() error {
 	return w.Flush()
 }
 
-func cmdSealSessionClean() error {
+func cmdSealRelease() error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")

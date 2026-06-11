@@ -29,9 +29,8 @@ func TestRunHelpAndUsage(t *testing.T) {
 		{name: "seal help (short)", args: []string{"seal", "--help"}, want: "Usage: git kura seal"},
 		{name: "seal enter help", args: []string{"seal", "enter", "--help"}, want: "Usage: git kura seal enter"},
 		{name: "seal current help", args: []string{"seal", "current", "--help"}, want: "Usage: git kura seal current"},
-		{name: "seal session help", args: []string{"seal", "session", "--help"}, want: "Usage: git kura seal session"},
-		{name: "seal session ls help", args: []string{"seal", "session", "ls", "--help"}, want: "Usage: git kura seal session ls"},
-		{name: "seal session clean help", args: []string{"seal", "session", "clean", "--help"}, want: "Usage: git kura seal session clean"},
+		{name: "seal ls help", args: []string{"seal", "ls", "--help"}, want: "Usage: git kura seal ls"},
+		{name: "seal release help", args: []string{"seal", "release", "--help"}, want: "Usage: git kura seal release"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := captureStdout(t, func() error {
@@ -82,10 +81,8 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"seal", "enter", "key", "--"},
 		{"seal", "current", "extra"},
 		{"seal", "unknown"},
-		{"seal", "session"},
-		{"seal", "session", "ls", "extra"},
-		{"seal", "session", "clean", "extra"},
-		{"seal", "session", "unknown"},
+		{"seal", "ls", "extra"},
+		{"seal", "release", "extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := run(args); err == nil {
@@ -497,16 +494,16 @@ func TestRunLsInProcess(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionLsEmpty(t *testing.T) {
+func TestCmdSealLsEmpty(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
 	withWorkingDir(t, repo, func() {
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "session", "ls"})
+			return run([]string{"seal", "ls"})
 		})
 		if err != nil {
-			t.Fatalf("seal session ls error = %v, want nil", err)
+			t.Fatalf("seal ls error = %v, want nil", err)
 		}
 		if !strings.Contains(stdout, "key") {
 			t.Fatalf("stdout = %q, want header row containing 'key'", stdout)
@@ -514,7 +511,7 @@ func TestCmdSealSessionLsEmpty(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionLsWithSessions(t *testing.T) {
+func TestCmdSealLsWithSessions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -540,10 +537,10 @@ func TestCmdSealSessionLsWithSessions(t *testing.T) {
 		})
 
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "session", "ls"})
+			return run([]string{"seal", "ls"})
 		})
 		if err != nil {
-			t.Fatalf("seal session ls error = %v, want nil", err)
+			t.Fatalf("seal ls error = %v, want nil", err)
 		}
 		for _, want := range []string{"active-key", "stale-key", sessionStatusStale} {
 			if !strings.Contains(stdout, want) {
@@ -553,7 +550,7 @@ func TestCmdSealSessionLsWithSessions(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionLsTTLExceeded(t *testing.T) {
+func TestCmdSealLsTTLExceeded(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -576,10 +573,10 @@ func TestCmdSealSessionLsTTLExceeded(t *testing.T) {
 
 		t.Setenv("GIT_KURA_SESSION_TTL", "5m")
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "session", "ls"})
+			return run([]string{"seal", "ls"})
 		})
 		if err != nil {
-			t.Fatalf("seal session ls error = %v, want nil", err)
+			t.Fatalf("seal ls error = %v, want nil", err)
 		}
 		if !strings.Contains(stdout, "ttl") {
 			t.Fatalf("stdout = %q, want it to contain 'ttl' for stale-candidate", stdout)
@@ -587,7 +584,7 @@ func TestCmdSealSessionLsTTLExceeded(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionCleanNoStale(t *testing.T) {
+func TestCmdSealReleaseNoStale(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -607,10 +604,10 @@ func TestCmdSealSessionCleanNoStale(t *testing.T) {
 		})
 
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "session", "clean"})
+			return run([]string{"seal", "release"})
 		})
 		if err != nil {
-			t.Fatalf("seal session clean error = %v, want nil", err)
+			t.Fatalf("seal release error = %v, want nil", err)
 		}
 		if !strings.Contains(strings.ToLower(stdout), "no stale") {
 			t.Fatalf("stdout = %q, want 'no stale' message", stdout)
@@ -623,7 +620,7 @@ func TestCmdSealSessionCleanNoStale(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionCleanWithStale(t *testing.T) {
+func TestCmdSealReleaseWithStale(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -645,10 +642,10 @@ func TestCmdSealSessionCleanWithStale(t *testing.T) {
 		stalePath := sealSessionPath(sessDir, "/wt-stale")
 
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "session", "clean"})
+			return run([]string{"seal", "release"})
 		})
 		if err != nil {
-			t.Fatalf("seal session clean error = %v, want nil", err)
+			t.Fatalf("seal release error = %v, want nil", err)
 		}
 		if !strings.Contains(stdout, "stale-key") {
 			t.Fatalf("stdout = %q, want it to mention stale-key", stdout)
@@ -659,7 +656,7 @@ func TestCmdSealSessionCleanWithStale(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionCleanKeepsTTLOnlyStale(t *testing.T) {
+func TestCmdSealReleaseKeepsTTLOnlyStale(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -682,9 +679,9 @@ func TestCmdSealSessionCleanKeepsTTLOnlyStale(t *testing.T) {
 		ttlPath := sealSessionPath(sessDir, "/wt-ttl")
 
 		if _, err := captureStdout(t, func() error {
-			return run([]string{"seal", "session", "clean"})
+			return run([]string{"seal", "release"})
 		}); err != nil {
-			t.Fatalf("seal session clean error = %v, want nil", err)
+			t.Fatalf("seal release error = %v, want nil", err)
 		}
 
 		if _, statErr := os.Stat(ttlPath); statErr != nil {
@@ -693,7 +690,7 @@ func TestCmdSealSessionCleanKeepsTTLOnlyStale(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionLsShowsCorrupt(t *testing.T) {
+func TestCmdSealLsShowsCorrupt(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
@@ -712,10 +709,10 @@ func TestCmdSealSessionLsShowsCorrupt(t *testing.T) {
 		t.Cleanup(func() { os.Remove(corruptPath) }) //nolint:errcheck
 
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "session", "ls"})
+			return run([]string{"seal", "ls"})
 		})
 		if err != nil {
-			t.Fatalf("seal session ls error = %v, want nil", err)
+			t.Fatalf("seal ls error = %v, want nil", err)
 		}
 		if !strings.Contains(stdout, "corrupt") {
 			t.Fatalf("stdout = %q, want it to contain 'corrupt'", stdout)
@@ -723,7 +720,7 @@ func TestCmdSealSessionLsShowsCorrupt(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionCleanWarnsAboutCorrupt(t *testing.T) {
+func TestCmdSealReleaseWarnsAboutCorrupt(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
@@ -742,10 +739,10 @@ func TestCmdSealSessionCleanWarnsAboutCorrupt(t *testing.T) {
 		t.Cleanup(func() { os.Remove(corruptPath) }) //nolint:errcheck
 
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "session", "clean"})
+			return run([]string{"seal", "release"})
 		})
 		if err != nil {
-			t.Fatalf("seal session clean error = %v, want nil", err)
+			t.Fatalf("seal release error = %v, want nil", err)
 		}
 		// corrupt file must be warned about but NOT deleted
 		if !strings.Contains(strings.ToLower(stdout), "corrupt") {
@@ -757,12 +754,12 @@ func TestCmdSealSessionCleanWarnsAboutCorrupt(t *testing.T) {
 	})
 }
 
-func TestCmdSealSessionOutsideRepo(t *testing.T) {
+func TestCmdSealLsAndReleaseOutsideRepo(t *testing.T) {
 	outside := t.TempDir()
 	withWorkingDir(t, outside, func() {
 		for _, args := range [][]string{
-			{"seal", "session", "ls"},
-			{"seal", "session", "clean"},
+			{"seal", "ls"},
+			{"seal", "release"},
 		} {
 			t.Run(strings.Join(args, " "), func(t *testing.T) {
 				if err := run(args); err == nil {
