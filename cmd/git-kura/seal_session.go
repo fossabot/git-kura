@@ -122,9 +122,20 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 	return "", sealSession{}, fmt.Errorf("could not acquire session record after retry")
 }
 
+// updateSealSession atomically replaces the session file using a temp-then-rename
+// strategy. os.Rename on POSIX is atomic (rename(2)); on Windows it is best-effort
+// but still avoids the truncate-before-write window that os.WriteFile would leave.
 func updateSealSession(path string, sess sealSession) error {
 	data, _ := json.Marshal(sess)
-	return os.WriteFile(path, data, 0o644)
+	tmp := path + ".tmp." + strconv.Itoa(sess.ParentPID)
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func deleteSealSession(path string) {
