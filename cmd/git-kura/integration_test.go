@@ -8,6 +8,76 @@ import (
 	"testing"
 )
 
+func TestSealCurrentPrintsEnvVar(t *testing.T) {
+	cli := newTestCLI(t)
+	dir := t.TempDir()
+
+	// Not set → non-zero exit, empty stdout, error on stderr
+	unset := cli.gitKuraWithSealKey(dir, "", "seal", "current")
+	requireNonZeroExitCode(t, unset)
+	requireEmptyStdout(t, unset)
+	requireStderrContains(t, unset, "GIT_KURA_SEAL_KEY")
+
+	// Set → exit 0, prints key
+	set := cli.gitKuraWithSealKey(dir, "my-key", "seal", "current")
+	requireExitCode(t, set, 0)
+	requireStdoutLine(t, set, "my-key")
+	requireCleanValueStdout(t, set)
+}
+
+func TestSealCurrentWorksOutsideRepository(t *testing.T) {
+	cli := newTestCLI(t)
+	outside := t.TempDir()
+
+	result := cli.gitKuraWithSealKey(outside, "outer-key", "seal", "current")
+	requireExitCode(t, result, 0)
+	requireStdoutLine(t, result, "outer-key")
+}
+
+func TestSealEnterSetsGitKuraSealKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("command-mode seal enter on Windows is covered by the Windows-specific test")
+	}
+
+	cli := newTestCLI(t)
+	dir := t.TempDir()
+
+	// Use -- mode: run `git kura seal current` inside the sealed context
+	result := cli.gitKuraWithSealKey(dir, "",
+		"seal", "enter", "test-key", "--", "git", "kura", "seal", "current")
+	requireExitCode(t, result, 0)
+	requireStdoutLine(t, result, "test-key")
+}
+
+func TestSealEnterWorksOutsideRepository(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("command-mode seal enter on Windows is covered by the Windows-specific test")
+	}
+
+	cli := newTestCLI(t)
+	outside := t.TempDir()
+
+	result := cli.gitKuraWithSealKey(outside, "",
+		"seal", "enter", "outside-key", "--", "git", "kura", "seal", "current")
+	requireExitCode(t, result, 0)
+	requireStdoutLine(t, result, "outside-key")
+}
+
+func TestSealEnterOverridesSealKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("command-mode seal enter on Windows is covered by the Windows-specific test")
+	}
+
+	cli := newTestCLI(t)
+	dir := t.TempDir()
+
+	// Even if GIT_KURA_SEAL_KEY is already set, enter overrides it in the child
+	result := cli.gitKuraWithSealKey(dir, "old-key",
+		"seal", "enter", "new-key", "--", "git", "kura", "seal", "current")
+	requireExitCode(t, result, 0)
+	requireStdoutLine(t, result, "new-key")
+}
+
 // Integration tests exercise the git-kura binary through Git's subcommand
 // dispatch against real temporary repositories.
 

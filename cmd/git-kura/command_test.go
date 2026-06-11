@@ -24,6 +24,9 @@ func TestRunHelpAndUsage(t *testing.T) {
 		{name: "open help", args: []string{"open", "--help"}, want: "Usage: git kura open"},
 		{name: "close help", args: []string{"close", "--help"}, want: "Usage: git kura close"},
 		{name: "ls help", args: []string{"ls", "--help"}, want: "Usage: git kura ls"},
+		{name: "seal help (short)", args: []string{"seal", "--help"}, want: "Usage: git kura seal"},
+		{name: "seal enter help", args: []string{"seal", "enter", "--help"}, want: "Usage: git kura seal enter"},
+		{name: "seal current help", args: []string{"seal", "current", "--help"}, want: "Usage: git kura seal current"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := captureStdout(t, func() error {
@@ -57,6 +60,11 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"open", "51", "--extra"},
 		{"close", "51", "--extra"},
 		{"ls", "unexpected"},
+		{"seal"},
+		{"seal", "enter"},
+		{"seal", "enter", "key", "extra"},
+		{"seal", "current", "extra"},
+		{"seal", "unknown"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := run(args); err == nil {

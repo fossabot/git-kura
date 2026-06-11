@@ -49,6 +49,7 @@ Commands:
   open  <key> [flags]  Create a worktree for <key>
   close <key>          Remove the worktree for <key>
   ls                   List all open worktrees
+  seal  <subcommand>   Manage seal keys for the current session
 
 Run "git kura <command> --help" for command-specific help.`
 
@@ -145,6 +146,9 @@ func run(args []string) error {
 			return err
 		}
 		return cmdLs()
+
+	case "seal":
+		return runSeal(args[1:])
 
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -359,4 +361,131 @@ func TestPrintTOONFields(t *testing.T) {
 
 func TestRequireCleanValueStdoutAcceptsWindowsPath(t *testing.T) {
 	requireCleanValueStdout(t, cliResult{stdout: `C:\repo.kura\worktrees\51` + "\n"})
+}
+
+func TestParseSealEnterArgs(t *testing.T) {
+	t.Run("valid key with no command", func(t *testing.T) {
+		key, cmd, err := parseSealEnterArgs([]string{"issue-12"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if key != "issue-12" {
+			t.Fatalf("key = %q, want %q", key, "issue-12")
+		}
+		if len(cmd) != 0 {
+			t.Fatalf("command = %v, want empty", cmd)
+		}
+	})
+
+	t.Run("-- command returns key and command", func(t *testing.T) {
+		key, cmd, err := parseSealEnterArgs([]string{"issue-12", "--", "echo", "hi"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if key != "issue-12" {
+			t.Fatalf("key = %q, want %q", key, "issue-12")
+		}
+		if len(cmd) != 2 || cmd[0] != "echo" || cmd[1] != "hi" {
+			t.Fatalf("command = %v, want [echo hi]", cmd)
+		}
+	})
+
+	t.Run("no key is usage error", func(t *testing.T) {
+		_, _, err := parseSealEnterArgs([]string{})
+		if err == nil {
+			t.Fatal("expected error for missing key, got nil")
+		}
+	})
+
+	t.Run("invalid key is error", func(t *testing.T) {
+		_, _, err := parseSealEnterArgs([]string{"../x"})
+		if err == nil {
+			t.Fatal("expected error for invalid key, got nil")
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "key") {
+			t.Fatalf("error %q does not mention key", err.Error())
+		}
+	})
+
+	t.Run("extra argument without -- is error", func(t *testing.T) {
+		_, _, err := parseSealEnterArgs([]string{"issue-12", "extra"})
+		if err == nil {
+			t.Fatal("expected error for extra argument, got nil")
+		}
+	})
+
+	t.Run("-- with no command is error", func(t *testing.T) {
+		_, _, err := parseSealEnterArgs([]string{"issue-12", "--"})
+		if err == nil {
+			t.Fatal("expected error for -- with no command, got nil")
+		}
+	})
+}
+
+func TestParseSealCurrentArgs(t *testing.T) {
+	t.Run("no args succeeds", func(t *testing.T) {
+		if err := parseSealCurrentArgs([]string{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("extra argument is error", func(t *testing.T) {
+		if err := parseSealCurrentArgs([]string{"extra"}); err == nil {
+			t.Fatal("expected error for extra argument, got nil")
+		}
+	})
+}
+
+func TestCmdSealCurrentPrintsKey(t *testing.T) {
+	t.Setenv("GIT_KURA_SEAL_KEY", "test-key-123")
+	stdout, err := captureStdout(t, cmdSealCurrent)
+	if err != nil {
+		t.Fatalf("cmdSealCurrent error = %v, want nil", err)
+	}
+	if strings.TrimSpace(stdout) != "test-key-123" {
+		t.Fatalf("stdout = %q, want %q", stdout, "test-key-123")
+	}
+}
+
+func TestCmdSealCurrentFailsWhenUnset(t *testing.T) {
+	prev, had := os.LookupEnv("GIT_KURA_SEAL_KEY")
+	os.Unsetenv("GIT_KURA_SEAL_KEY")
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("GIT_KURA_SEAL_KEY", prev)
+		} else {
+			os.Unsetenv("GIT_KURA_SEAL_KEY")
+		}
+	})
+	if err := cmdSealCurrent(); err == nil {
+		t.Fatal("cmdSealCurrent error = nil, want error when GIT_KURA_SEAL_KEY is not set")
+	}
+}
+
+func TestDetectShellUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix shell detection is not tested on Windows")
+	}
+
+	t.Run("uses SHELL env var when set", func(t *testing.T) {
+		t.Setenv("SHELL", "/bin/myshell")
+		if got := detectShell(); got != "/bin/myshell" {
+			t.Fatalf("detectShell() = %q, want %q", got, "/bin/myshell")
+		}
+	})
+
+	t.Run("falls back to sh when SHELL not set", func(t *testing.T) {
+		prev, had := os.LookupEnv("SHELL")
+		os.Unsetenv("SHELL")
+		t.Cleanup(func() {
+			if had {
+				os.Setenv("SHELL", prev)
+			} else {
+				os.Unsetenv("SHELL")
+			}
+		})
+		if got := detectShell(); got != "sh" {
+			t.Fatalf("detectShell() = %q, want sh", got)
+		}
+	})
 }
