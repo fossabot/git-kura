@@ -45,7 +45,7 @@ func TestSealEnterSetsGitKuraSealKey(t *testing.T) {
 	result := cli.gitKuraWithSealKey(repo, "",
 		"seal", "enter", "test-key", "--", "git", "kura", "seal", "current")
 	requireExitCode(t, result, 0)
-	requireStdoutLine(t, result, "test-key")
+	requireStdoutContainsLine(t, result, "test-key")
 }
 
 func TestSealEnterFailsOutsideRepository(t *testing.T) {
@@ -75,7 +75,7 @@ func TestSealEnterOverridesSealKey(t *testing.T) {
 	result := cli.gitKuraWithSealKey(repo, "old-key",
 		"seal", "enter", "new-key", "--", "git", "kura", "seal", "current")
 	requireExitCode(t, result, 0)
-	requireStdoutLine(t, result, "new-key")
+	requireStdoutContainsLine(t, result, "new-key")
 }
 
 func TestSealEnterSessionGuardRejectsDifferentKey(t *testing.T) {

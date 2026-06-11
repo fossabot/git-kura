@@ -8,6 +8,7 @@ import (
 	"runtime"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
+	"github.com/tooppoo/git-kura/internal/worktree"
 )
 
 const sealHelp = `Usage: git kura seal <subcommand> [args]
@@ -137,6 +138,12 @@ func cmdSealEnter(a sealEnterArgs) error {
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "GIT_KURA_SEAL_KEY="+a.Key)
 
+	wtPath, wtErr := worktree.Path(repoRoot, a.Key)
+	if wtErr != nil {
+		wtPath = "(unknown)"
+	}
+	fmt.Printf("[kura] entered seal: %s\nworktree: %s\nrun `git kura seal current` to inspect\ntype `exit` to leave\n", a.Key, wtPath)
+
 	if err := cmd.Start(); err != nil {
 		return errors.Join(fmt.Errorf("seal enter: %w", err), deleteSealSession(sessPath))
 	}
@@ -169,7 +176,7 @@ func cmdSealEnter(a sealEnterArgs) error {
 func cmdSealCurrent() error {
 	key := os.Getenv("GIT_KURA_SEAL_KEY")
 	if key == "" {
-		return fmt.Errorf("GIT_KURA_SEAL_KEY is not set")
+		return fmt.Errorf("not in sealed session (GIT_KURA_SEAL_KEY not set), run 'git kura seal enter <key>' to start one")
 	}
 	fmt.Println(key)
 	return nil
