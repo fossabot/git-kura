@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -633,6 +634,107 @@ func TestAcquireSealSessionTTLWarning(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "ttl") {
 		t.Fatalf("error %q does not mention TTL", err.Error())
+	}
+}
+
+func TestCmdSealEnterFailsOutsideGitRepo(t *testing.T) {
+	withWorkingDir(t, t.TempDir(), func() {
+		if err := cmdSealEnter("key1", []string{"true"}); err == nil {
+			t.Fatal("cmdSealEnter outside git repo error = nil, want error")
+		}
+	})
+}
+
+func TestSessionAliveDeadChild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+	deadPID := deadPIDForTest(t)
+	sess := sealSession{ParentPID: os.Getpid(), ChildPID: deadPID}
+	if sessionAlive(sess) {
+		t.Fatal("sessionAlive = true for dead child PID, want false")
+	}
+}
+
+func TestAcquireSealSessionCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	finalPath := sealSessionPath(dir, "/wt-corrupt")
+	if err := os.WriteFile(finalPath, []byte("not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := acquireSealSession(dir, "/wt-corrupt", "key", os.Getpid())
+	if err == nil {
+		t.Fatal("corrupt session file: error = nil, want error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "corrupt") {
+		t.Fatalf("error %q does not mention 'corrupt'", err.Error())
+	}
+}
+
+func TestPidAliveZeroPid(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific zero-PID test")
+	}
+	if pidAlive(0) {
+		t.Fatal("pidAlive(0) = true, want false")
+	}
+	if pidAlive(-1) {
+		t.Fatal("pidAlive(-1) = true, want false")
+	}
+}
+
+func TestSealSessionDirOutsideRepo(t *testing.T) {
+	_, err := sealSessionDir(t.TempDir())
+	if err == nil {
+		t.Fatal("sealSessionDir outside git repo: error = nil, want error")
+	}
+}
+
+func TestAcquireSealSessionReadFileError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks may require elevated privileges on Windows")
+	}
+	dir := t.TempDir()
+	finalPath := sealSessionPath(dir, "/wt-broken-link")
+	// Broken symlink: directory entry exists (causes EEXIST for Link)
+	// but os.ReadFile follows the symlink and gets an error (target absent).
+	if err := os.Symlink(finalPath+".gone", finalPath); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := acquireSealSession(dir, "/wt-broken-link", "key", os.Getpid())
+	if err == nil {
+		t.Fatal("broken symlink at session path: error = nil, want error")
+	}
+}
+
+func TestAcquireSealSessionMkdirAllFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can always mkdir; skip permission test")
+	}
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(parent, 0o755) }) //nolint:errcheck
+	sessDir := filepath.Join(parent, "sessions")
+	_, _, err := acquireSealSession(sessDir, "/wt", "key", os.Getpid())
+	if err == nil {
+		t.Fatal("MkdirAll in unwritable parent: error = nil, want error")
+	}
+}
+
+func TestAcquireSealSessionWriteTmpFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can always write; skip permission test")
+	}
+	sessDir := t.TempDir()
+	if err := os.Chmod(sessDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(sessDir, 0o755) }) //nolint:errcheck
+	_, _, err := acquireSealSession(sessDir, "/wt", "key", os.Getpid())
+	if err == nil {
+		t.Fatal("WriteFile in non-writable sessDir: error = nil, want error")
 	}
 }
 
