@@ -137,7 +137,15 @@ func cmdSealEnter(key string, command []string) error {
 	}
 
 	sess.ChildPID = cmd.Process.Pid
-	_ = updateSealSession(sessPath, sess)
+	if err := updateSealSession(sessPath, sess); err != nil {
+		// Session file can't reflect the child PID.  A dead parent with child_pid=0
+		// looks stale to future seal enter callers even while the child shell runs.
+		// Abort: kill the child so the user can retry with a consistent state.
+		cmd.Process.Kill() //nolint:errcheck
+		cmd.Wait()         //nolint:errcheck
+		deleteSealSession(sessPath)
+		return fmt.Errorf("seal enter: record child PID in session: %w", err)
+	}
 
 	waitErr := cmd.Wait()
 	deleteSealSession(sessPath)
