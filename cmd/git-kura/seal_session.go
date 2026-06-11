@@ -1,8 +1,6 @@
 package main
 
 import (
-	_ "embed"
-
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,9 +13,6 @@ import (
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
 )
-
-//go:embed schema/session.schema.json
-var sealSessionSchemaJSON []byte
 
 const defaultSessionTTL = 5 * time.Minute
 
@@ -89,17 +84,14 @@ func acquireSealSession(sessDir, worktreePath, key string, parentPID int) (strin
 	}
 
 	if err := os.Link(tmpPath, finalPath); err == nil {
-		// Cleanup failure leaves a per-PID tmp file that is harmless on retry.
-		if removeErr := os.Remove(tmpPath); removeErr != nil {
-		}
-		return finalPath, sess, nil
+		return finalPath, sess, os.Remove(tmpPath)
 	} else if !os.IsExist(err) {
 		return "", sealSession{}, errors.Join(fmt.Errorf("acquire session lock: %w", err), os.Remove(tmpPath))
 	}
 
 	// finalPath exists — always complete JSON (written via Link or atomic rename).
-	// Cleanup failure leaves a per-PID tmp file that is harmless on retry.
 	if removeErr := os.Remove(tmpPath); removeErr != nil {
+		return "", sealSession{}, fmt.Errorf("acquire session: clean up temp file: %w", removeErr)
 	}
 	existingData, readErr := os.ReadFile(finalPath)
 	if readErr != nil {
@@ -147,14 +139,13 @@ func updateSealSession(path string, sess sealSession) error {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
+		return errors.Join(err, os.Remove(tmp))
 	}
 	return nil
 }
 
-func deleteSealSession(path string) {
-	os.Remove(path)
+func deleteSealSession(path string) error {
+	return os.Remove(path)
 }
 
 func sessionAlive(s sealSession) bool {

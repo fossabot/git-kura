@@ -525,7 +525,7 @@ func writeSealSessionFile(t *testing.T, sessDir string, sess sealSession) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(path) })
+	t.Cleanup(func() { os.Remove(path) }) //nolint:errcheck
 }
 
 func TestAcquireSealSessionSucceeds(t *testing.T) {
@@ -535,7 +535,7 @@ func TestAcquireSealSessionSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquireSealSession error = %v, want nil", err)
 	}
-	t.Cleanup(func() { os.Remove(path) })
+	t.Cleanup(func() { os.Remove(path) }) //nolint:errcheck
 
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("session file missing after acquire: %v", err)

@@ -138,8 +138,7 @@ func cmdSealEnter(a sealEnterArgs) error {
 	cmd.Env = append(os.Environ(), "GIT_KURA_SEAL_KEY="+a.Key)
 
 	if err := cmd.Start(); err != nil {
-		deleteSealSession(sessPath)
-		return fmt.Errorf("seal enter: %w", err)
+		return errors.Join(fmt.Errorf("seal enter: %w", err), deleteSealSession(sessPath))
 	}
 
 	sess.ChildPID = cmd.Process.Pid
@@ -152,20 +151,19 @@ func cmdSealEnter(a sealEnterArgs) error {
 		if waitErr := cmd.Wait(); waitErr != nil && !errors.As(waitErr, new(*exec.ExitError)) {
 			killErr = errors.Join(killErr, fmt.Errorf("wait for killed child: %w", waitErr))
 		}
-		deleteSealSession(sessPath)
-		return errors.Join(fmt.Errorf("seal enter: record child PID in session: %w", err), killErr)
+		return errors.Join(fmt.Errorf("seal enter: record child PID in session: %w", err), killErr, deleteSealSession(sessPath))
 	}
 
 	waitErr := cmd.Wait()
-	deleteSealSession(sessPath)
+	deleteErr := deleteSealSession(sessPath)
 
 	if waitErr != nil {
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			os.Exit(exitErr.ExitCode())
 		}
-		return fmt.Errorf("seal enter: %w", waitErr)
+		return errors.Join(fmt.Errorf("seal enter: %w", waitErr), deleteErr)
 	}
-	return nil
+	return deleteErr
 }
 
 func cmdSealCurrent() error {
