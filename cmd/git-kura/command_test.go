@@ -361,7 +361,7 @@ func TestCmdSealEnterDefaultShell(t *testing.T) {
 
 		// SHELL="" causes detectShell() to fall back to "sh"; sh exits immediately on /dev/null stdin.
 		t.Setenv("SHELL", "")
-		if err := cmdSealEnter("key1", nil); err != nil {
+		if err := cmdSealEnter(sealEnterArgs{Key: "key1"}); err != nil {
 			t.Fatalf("cmdSealEnter with default shell error = %v", err)
 		}
 	})

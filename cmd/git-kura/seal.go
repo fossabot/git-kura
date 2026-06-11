@@ -64,7 +64,7 @@ func runSeal(args []string) error {
 		if err != nil {
 			return err
 		}
-		return cmdSealEnter(a.Key, a.Command)
+		return cmdSealEnter(a)
 	case "current":
 		if hasHelpFlag(args[1:]) {
 			fmt.Println(sealCurrentHelp)
@@ -109,7 +109,7 @@ func parseSealCurrentArgs(args []string) error {
 	return nil
 }
 
-func cmdSealEnter(key string, command []string) error {
+func cmdSealEnter(a sealEnterArgs) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
@@ -120,21 +120,21 @@ func cmdSealEnter(key string, command []string) error {
 		return err
 	}
 
-	sessPath, sess, err := acquireSealSession(sessDir, repoRoot, key, os.Getpid())
+	sessPath, sess, err := acquireSealSession(sessDir, repoRoot, a.Key, os.Getpid())
 	if err != nil {
 		return err
 	}
 
 	var cmd *exec.Cmd
-	if len(command) > 0 {
-		cmd = exec.Command(command[0], command[1:]...)
+	if len(a.Command) > 0 {
+		cmd = exec.Command(a.Command[0], a.Command[1:]...)
 	} else {
 		cmd = exec.Command(detectShell())
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "GIT_KURA_SEAL_KEY="+key)
+	cmd.Env = append(os.Environ(), "GIT_KURA_SEAL_KEY="+a.Key)
 
 	if err := cmd.Start(); err != nil {
 		deleteSealSession(sessPath)
@@ -146,8 +146,8 @@ func cmdSealEnter(key string, command []string) error {
 		// Session file can't reflect the child PID.  A dead parent with child_pid=0
 		// looks stale to future seal enter callers even while the child shell runs.
 		// Abort: kill the child so the user can retry with a consistent state.
-		cmd.Process.Kill() //nolint:errcheck
-		cmd.Wait()         //nolint:errcheck
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		deleteSealSession(sessPath)
 		return fmt.Errorf("seal enter: record child PID in session: %w", err)
 	}

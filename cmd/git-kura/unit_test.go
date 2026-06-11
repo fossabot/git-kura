@@ -623,7 +623,7 @@ func TestAcquireSealSessionTTLWarning(t *testing.T) {
 
 func TestCmdSealEnterFailsOutsideGitRepo(t *testing.T) {
 	withWorkingDir(t, t.TempDir(), func() {
-		if err := cmdSealEnter("key1", []string{"true"}); err == nil {
+		if err := cmdSealEnter(sealEnterArgs{Key: "key1", Command: []string{"true"}}); err == nil {
 			t.Fatal("cmdSealEnter outside git repo error = nil, want error")
 		}
 	})
