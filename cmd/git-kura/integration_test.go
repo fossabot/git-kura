@@ -734,22 +734,6 @@ func TestSealRemoveMissingPathArg(t *testing.T) {
 	requireNonZeroExitCode(t, result)
 }
 
-func TestSealAddUnexpectedArg(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt", "extra")
-	requireNonZeroExitCode(t, result)
-}
-
-func TestSealRemoveUnexpectedArg(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "remove", "tracked.txt", "extra")
-	requireNonZeroExitCode(t, result)
-}
-
 func TestSealAddHelpFlag(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)

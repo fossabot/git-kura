@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,45 +13,53 @@ import (
 
 const sealPathSchemaVersion = 1
 
+// sealPathStore is the on-disk record written to <git-common-dir>/kura/seals.json.
+// Paths maps each repository-relative file path to the key that sealed it.
 type sealPathStore struct {
-	SchemaVersion int      `json:"schemaVersion"`
-	Key           string   `json:"key"`
-	Paths         []string `json:"paths"`
+	SchemaVersion int               `json:"schemaVersion"`
+	Paths         map[string]string `json:"paths"` // repo-relative path → key
 }
 
-func sealPathDir(repoRoot string) (string, error) {
+func sealStoreFile(repoRoot string) (string, error) {
 	commonDir, err := gitutil.CommonDir(repoRoot)
 	if err != nil {
 		return "", fmt.Errorf("get git common dir: %w", err)
 	}
-	return filepath.Join(commonDir, "kura", "seals"), nil
+	return filepath.Join(commonDir, "kura", "seals.json"), nil
 }
 
-func sealPathStoreFile(sealDir, key string) string {
-	return filepath.Join(sealDir, key+".json")
-}
-
-func readSealPathStore(path string) (sealPathStore, error) {
+func readSealStore(path string) (sealPathStore, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return sealPathStore{}, nil
+			return sealPathStore{Paths: make(map[string]string)}, nil
 		}
-		return sealPathStore{}, fmt.Errorf("read seal path store: %w", err)
+		return sealPathStore{}, fmt.Errorf("read seal store: %w", err)
 	}
 	var store sealPathStore
 	if err := json.Unmarshal(data, &store); err != nil {
-		return sealPathStore{}, fmt.Errorf("parse seal path store: %w", err)
+		return sealPathStore{}, fmt.Errorf("parse seal store: %w", err)
+	}
+	if store.Paths == nil {
+		store.Paths = make(map[string]string)
 	}
 	return store, nil
 }
 
-func writeSealPathStore(path string, store sealPathStore) error {
+func writeSealStore(path string, store sealPathStore) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create seal path store dir: %w", err)
+		return fmt.Errorf("create seal store dir: %w", err)
 	}
+	store.SchemaVersion = sealPathSchemaVersion
 	data, _ := json.Marshal(store)
-	return os.WriteFile(path, data, 0o644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write seal store: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return errors.Join(fmt.Errorf("commit seal store: %w", err), os.Remove(tmp))
+	}
+	return nil
 }
 
 // normalizeSealPath converts rawPath to a clean repository-relative path.
@@ -77,41 +86,74 @@ func normalizeSealPath(repoRoot, rawPath string) (string, error) {
 	return rel, nil
 }
 
-// findKeyForPath searches all seal stores and returns the key that seals the
-// given repo-relative path. Returns "" if no key seals that path.
-func findKeyForPath(sealDir, repoRelPath string) (string, error) {
-	entries, err := os.ReadDir(sealDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", fmt.Errorf("read seal dir: %w", err)
+// sealContext reads and validates GIT_KURA_SEAL_KEY, returning the key or an error.
+func sealContext() (string, error) {
+	key := os.Getenv("GIT_KURA_SEAL_KEY")
+	if key == "" {
+		return "", fmt.Errorf("not in sealed session (GIT_KURA_SEAL_KEY not set), run 'git kura seal enter <key>' to start one")
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		storePath := filepath.Join(sealDir, entry.Name())
-		store, err := readSealPathStore(storePath)
+	if err := validateKey(key); err != nil {
+		return "", fmt.Errorf("GIT_KURA_SEAL_KEY is invalid: %w", err)
+	}
+	return key, nil
+}
+
+func cmdSealAdd(rawPaths []string) error {
+	key, err := sealContext()
+	if err != nil {
+		return err
+	}
+
+	repoRoot, err := gitutil.RepoRoot()
+	if err != nil {
+		return fmt.Errorf("not inside a git repository")
+	}
+
+	storeFile, err := sealStoreFile(repoRoot)
+	if err != nil {
+		return err
+	}
+
+	store, err := readSealStore(storeFile)
+	if err != nil {
+		return err
+	}
+
+	changed := false
+	for _, rawPath := range rawPaths {
+		relPath, err := normalizeSealPath(repoRoot, rawPath)
 		if err != nil {
-			return "", fmt.Errorf("read seal store %s: %w", entry.Name(), err)
+			return err
 		}
-		for _, p := range store.Paths {
-			if p == repoRelPath {
-				return store.Key, nil
+
+		absPath := filepath.Join(repoRoot, relPath)
+		if _, err := os.Stat(absPath); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("path %q does not exist", rawPath)
 			}
+			return fmt.Errorf("check path: %w", err)
 		}
+
+		if existingKey, sealed := store.Paths[relPath]; sealed {
+			if existingKey != key {
+				return fmt.Errorf("path %q is already sealed under key %q", rawPath, existingKey)
+			}
+			continue // idempotent: already sealed under same key
+		}
+
+		store.Paths[relPath] = key
+		changed = true
 	}
-	return "", nil
+
+	if !changed {
+		return nil
+	}
+	return writeSealStore(storeFile, store)
 }
 
-func cmdSealAdd(rawPath string) error {
-	key := os.Getenv("GIT_KURA_SEAL_KEY")
-	if key == "" {
-		return fmt.Errorf("not in sealed session (GIT_KURA_SEAL_KEY not set), run 'git kura seal enter <key>' to start one")
-	}
-	if err := validateKey(key); err != nil {
-		return fmt.Errorf("GIT_KURA_SEAL_KEY is invalid: %w", err)
+func cmdSealRemove(rawPaths []string) error {
+	if _, err := sealContext(); err != nil {
+		return err
 	}
 
 	repoRoot, err := gitutil.RepoRoot()
@@ -119,99 +161,33 @@ func cmdSealAdd(rawPath string) error {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	relPath, err := normalizeSealPath(repoRoot, rawPath)
+	storeFile, err := sealStoreFile(repoRoot)
 	if err != nil {
 		return err
 	}
 
-	absPath := filepath.Join(repoRoot, relPath)
-	if _, err := os.Stat(absPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("path %q does not exist", rawPath)
+	store, err := readSealStore(storeFile)
+	if err != nil {
+		return err
+	}
+
+	changed := false
+	for _, rawPath := range rawPaths {
+		relPath, err := normalizeSealPath(repoRoot, rawPath)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("check path: %w", err)
-	}
 
-	sealDir, err := sealPathDir(repoRoot)
-	if err != nil {
-		return err
-	}
-
-	existingKey, err := findKeyForPath(sealDir, relPath)
-	if err != nil {
-		return err
-	}
-	if existingKey != "" && existingKey != key {
-		return fmt.Errorf("path %q is already sealed under key %q", rawPath, existingKey)
-	}
-
-	storePath := sealPathStoreFile(sealDir, key)
-	store, err := readSealPathStore(storePath)
-	if err != nil {
-		return err
-	}
-
-	for _, p := range store.Paths {
-		if p == relPath {
-			return nil
+		if _, sealed := store.Paths[relPath]; !sealed {
+			continue // idempotent: path not in store
 		}
+
+		delete(store.Paths, relPath)
+		changed = true
 	}
 
-	store.SchemaVersion = sealPathSchemaVersion
-	store.Key = key
-	store.Paths = append(store.Paths, relPath)
-
-	return writeSealPathStore(storePath, store)
-}
-
-func cmdSealRemove(rawPath string) error {
-	key := os.Getenv("GIT_KURA_SEAL_KEY")
-	if key == "" {
-		return fmt.Errorf("not in sealed session (GIT_KURA_SEAL_KEY not set), run 'git kura seal enter <key>' to start one")
-	}
-	if err := validateKey(key); err != nil {
-		return fmt.Errorf("GIT_KURA_SEAL_KEY is invalid: %w", err)
-	}
-
-	repoRoot, err := gitutil.RepoRoot()
-	if err != nil {
-		return fmt.Errorf("not inside a git repository")
-	}
-
-	relPath, err := normalizeSealPath(repoRoot, rawPath)
-	if err != nil {
-		return err
-	}
-
-	sealDir, err := sealPathDir(repoRoot)
-	if err != nil {
-		return err
-	}
-
-	storePath := sealPathStoreFile(sealDir, key)
-	store, err := readSealPathStore(storePath)
-	if err != nil {
-		return err
-	}
-
-	newPaths := make([]string, 0, len(store.Paths))
-	for _, p := range store.Paths {
-		if p != relPath {
-			newPaths = append(newPaths, p)
-		}
-	}
-
-	if len(newPaths) == len(store.Paths) {
+	if !changed {
 		return nil
 	}
-
-	if len(newPaths) == 0 {
-		if err := os.Remove(storePath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove empty seal store: %w", err)
-		}
-		return nil
-	}
-
-	store.Paths = newPaths
-	return writeSealPathStore(storePath, store)
+	return writeSealStore(storeFile, store)
 }
