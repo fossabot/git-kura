@@ -29,9 +29,9 @@ This ADR records the decision to use a session-local current key model.
 
 Related issues:
 
-* #9 defines the overall `git kura seal` command set.
-* #13 defines `git kura seal enter <key>` and the worktree session guard.
-* #14 defines `git kura seal session ls` and `git kura seal session clean`.
+* [#9](https://github.com/tooppoo/git-kura/issues/9) defines the overall `git kura seal` command set.
+* [#13](https://github.com/tooppoo/git-kura/issues/13) defines `git kura seal enter <key>` and the worktree session guard.
+* [#14](https://github.com/tooppoo/git-kura/issues/14) defines `git kura seal session ls` and `git kura seal session clean`.
 
 ## Decision
 
