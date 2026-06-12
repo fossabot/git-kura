@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,10 +11,45 @@ import (
 	"strings"
 	"time"
 
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 )
 
 const sealPathSchemaVersion = 1
+
+//go:embed schema/seal_store.schema.json
+var sealStoreSchemaJSON []byte
+
+var sealStoreSchema = mustCompileSealStoreSchema()
+
+func mustCompileSealStoreSchema() *jsonschema.Schema {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(sealStoreSchemaJSON))
+	if err != nil {
+		panic(fmt.Sprintf("parse seal store schema: %v", err))
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("seal_store.schema.json", doc); err != nil {
+		panic(fmt.Sprintf("add seal store schema resource: %v", err))
+	}
+	sch, err := c.Compile("seal_store.schema.json")
+	if err != nil {
+		panic(fmt.Sprintf("compile seal store schema: %v", err))
+	}
+	return sch
+}
+
+// validateSealStoreJSON checks that raw store JSON conforms to
+// schema/seal_store.schema.json.
+func validateSealStoreJSON(data []byte) error {
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("parse seal store: %w", err)
+	}
+	if err := sealStoreSchema.Validate(inst); err != nil {
+		return fmt.Errorf("seal store does not conform to schema: %w", err)
+	}
+	return nil
+}
 
 // sealStoreLockTimeout is the maximum time to wait for the seal store lock.
 // Future: make configurable via GIT_KURA_SEAL_LOCK_TIMEOUT or a config file.
@@ -53,6 +90,11 @@ func readSealStore(path string) (sealPathStore, error) {
 		}
 		return sealPathStore{}, fmt.Errorf("read seal store: %w", err)
 	}
+	// Validate before unmarshalling so a hand-edited or corrupted store is
+	// rejected instead of being silently coerced into the Go struct.
+	if err := validateSealStoreJSON(data); err != nil {
+		return sealPathStore{}, fmt.Errorf("read seal store %s: %w", path, err)
+	}
 	var store sealPathStore
 	if err := json.Unmarshal(data, &store); err != nil {
 		return sealPathStore{}, fmt.Errorf("parse seal store: %w", err)
@@ -68,7 +110,15 @@ func writeSealStore(path string, store sealPathStore) error {
 		return fmt.Errorf("create seal store dir: %w", err)
 	}
 	store.SchemaVersion = sealPathSchemaVersion
+	if store.Paths == nil {
+		store.Paths = make(map[string]sealEntry)
+	}
 	data, _ := json.Marshal(store)
+	// Validate before writing so a bug can never persist a store that other
+	// readers (or the future commit hook) would reject.
+	if err := validateSealStoreJSON(data); err != nil {
+		return fmt.Errorf("refusing to write seal store: %w", err)
+	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("write seal store: %w", err)

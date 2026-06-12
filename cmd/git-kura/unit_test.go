@@ -1213,6 +1213,60 @@ func TestReadSealStoreCorrupt(t *testing.T) {
 	}
 }
 
+func TestReadSealStoreRejectsSchemaViolations(t *testing.T) {
+	for name, content := range map[string]string{
+		// valid JSON, but entries must be objects with a "key" field
+		"bare string entry": `{"schemaVersion":1,"paths":{"src/a.go":"key1"}}`,
+		// unsupported schema version
+		"wrong schemaVersion": `{"schemaVersion":2,"paths":{}}`,
+		// missing required fields
+		"missing paths": `{"schemaVersion":1}`,
+		// empty key violates minLength
+		"empty key": `{"schemaVersion":1,"paths":{"src/a.go":{"key":""}}}`,
+		// unknown top-level field violates additionalProperties
+		"unknown field": `{"schemaVersion":1,"paths":{},"extra":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "paths.json")
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readSealStore(path); err == nil {
+				t.Fatalf("expected schema validation error for %s, got nil", name)
+			}
+		})
+	}
+}
+
+func TestWriteSealStoreRejectsSchemaViolations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paths.json")
+	// An empty key violates the schema's minLength constraint; the write
+	// must be refused and nothing persisted.
+	err := writeSealStore(path, sealPathStore{
+		Paths: map[string]sealEntry{"src/a.go": {Key: ""}},
+	})
+	if err == nil {
+		t.Fatal("expected schema validation error, got nil")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("store file should not exist after refused write (stat err: %v)", statErr)
+	}
+}
+
+func TestWriteSealStoreNormalizesNilPaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paths.json")
+	if err := writeSealStore(path, sealPathStore{}); err != nil {
+		t.Fatalf("write with nil Paths should normalize to empty map: %v", err)
+	}
+	got, err := readSealStore(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.Paths == nil || len(got.Paths) != 0 {
+		t.Fatalf("expected empty paths map, got %+v", got.Paths)
+	}
+}
+
 func TestReadSealStoreUnreadable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("file permission tests are Unix-specific")
@@ -1385,6 +1439,80 @@ func TestAcquireSealLockTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "seal-lock-timeout:") {
 		t.Fatalf("expected 'seal-lock-timeout:' prefix in error: %s", err.Error())
+	}
+}
+
+func TestAcquireSealLockTimeoutFromEnv(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "paths.lock")
+
+	// Hold the lock so acquisition must time out.
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	defer func() { _ = os.Remove(lockPath) }()
+
+	t.Setenv("GIT_KURA_SEAL_LOCK_TIMEOUT", "50ms")
+	start := time.Now()
+	_, err = acquireSealLock(lockPath)
+	if err == nil {
+		t.Fatal("expected lock-timeout error, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("env timeout not honored: took %s", elapsed)
+	}
+	if !strings.Contains(err.Error(), "50ms") {
+		t.Fatalf("expected timeout from env in message, got: %s", err.Error())
+	}
+}
+
+func TestAcquireSealLockUnwritableDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission tests are Unix-specific")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root: permission restrictions don't apply")
+	}
+	dir := filepath.Join(t.TempDir(), "seals")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(dir, 0o755) }()
+
+	_, err := acquireSealLock(filepath.Join(dir, "paths.lock"))
+	if err == nil {
+		t.Fatal("expected error creating lock in unwritable dir, got nil")
+	}
+	var xe *exitError
+	if errors.As(err, &xe) {
+		t.Fatalf("permission error must not be reported as lock timeout: %v", err)
+	}
+}
+
+func TestWriteSealStoreUnwritableDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission tests are Unix-specific")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root: permission restrictions don't apply")
+	}
+	dir := filepath.Join(t.TempDir(), "seals")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(dir, 0o755) }()
+
+	err := writeSealStore(filepath.Join(dir, "paths.json"), sealPathStore{Paths: map[string]sealEntry{}})
+	if err == nil {
+		t.Fatal("expected error writing store in unwritable dir, got nil")
 	}
 }
 
