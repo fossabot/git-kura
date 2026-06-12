@@ -651,6 +651,17 @@ func TestSealAddRejectsDifferentKey(t *testing.T) {
 	requireStderrContains(t, result, "key1")
 }
 
+func TestSealRemoveRejectsDifferentKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+
+	result := cli.gitKuraWithSealKey(repo, "key2", "seal", "remove", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "key1")
+}
+
 func TestSealAddRejectsNonExistentFile(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)

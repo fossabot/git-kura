@@ -1357,6 +1357,29 @@ func TestCmdSealAddRejectsDifferentKeyInProcess(t *testing.T) {
 	})
 }
 
+func TestCmdSealRemoveRejectsDifferentKeyInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealAdd: %v", err)
+		}
+
+		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+		if err := cmdSealRemove([]string{"tracked.txt"}); err == nil {
+			t.Fatal("expected error when removing path owned by different key, got nil")
+		}
+
+		// key1's seal must still be intact
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("seal should still be owned by key1 after failed removal: %v", err)
+		}
+	})
+}
+
 func TestCmdSealAddNonExistentFileInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)

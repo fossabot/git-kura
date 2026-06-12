@@ -152,7 +152,8 @@ func cmdSealAdd(rawPaths []string) error {
 }
 
 func cmdSealRemove(rawPaths []string) error {
-	if _, err := sealContext(); err != nil {
+	key, err := sealContext()
+	if err != nil {
 		return err
 	}
 
@@ -178,8 +179,12 @@ func cmdSealRemove(rawPaths []string) error {
 			return err
 		}
 
-		if _, sealed := store.Paths[relPath]; !sealed {
+		ownerKey, sealed := store.Paths[relPath]
+		if !sealed {
 			continue // idempotent: path not in store
+		}
+		if ownerKey != key {
+			return fmt.Errorf("path %q is sealed under key %q, not the current key %q", rawPath, ownerKey, key)
 		}
 
 		delete(store.Paths, relPath)
