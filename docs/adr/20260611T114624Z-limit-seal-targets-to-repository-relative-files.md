@@ -17,8 +17,9 @@ are:
 
 - **Absolute paths are rejected** with a usage error.
 - **Paths outside the repository root are rejected** with a usage error.
-- Relative paths are resolved against the current working directory, then made
-  relative to the repository root via `filepath.Rel`.
+- **Arguments are interpreted relative to the repository root**, never the
+  caller's working directory, so the same argument always resolves to the
+  same file regardless of where the command is invoked.
 - `.`, `..`, and redundant separators are cleaned with `filepath.Clean`.
 - **Stored paths use forward-slash separators** (`filepath.ToSlash`) for
   cross-platform consistency.

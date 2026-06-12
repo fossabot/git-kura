@@ -1131,17 +1131,8 @@ func TestNormalizeSealPathAbsoluteRejected(t *testing.T) {
 	}
 }
 
-func TestNormalizeSealPathRelative(t *testing.T) {
+func TestNormalizeSealPathRootRelative(t *testing.T) {
 	root := t.TempDir()
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(old) }()
-
 	path, err := normalizeSealPath(root, "src/foo.go")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1151,41 +1142,54 @@ func TestNormalizeSealPathRelative(t *testing.T) {
 	}
 }
 
-func TestNormalizeSealPathEscapesRepo(t *testing.T) {
+func TestNormalizeSealPathIgnoresWorkingDirectory(t *testing.T) {
 	root := t.TempDir()
-	withWorkingDir(t, root, func() {
-		_, err := normalizeSealPath(root, "../escape.go")
-		if err == nil {
-			t.Fatal("expected error for path outside repo, got nil")
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Even when the caller's cwd is a subdirectory, the argument is resolved
+	// against the repository root, not the cwd.
+	withWorkingDir(t, sub, func() {
+		path, err := normalizeSealPath(root, "src/foo.go")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if path != filepath.Join("src", "foo.go") {
+			t.Fatalf("got %q, want %q", path, filepath.Join("src", "foo.go"))
 		}
 	})
+}
+
+func TestNormalizeSealPathEscapesRepo(t *testing.T) {
+	root := t.TempDir()
+	_, err := normalizeSealPath(root, "../escape.go")
+	if err == nil {
+		t.Fatal("expected error for path outside repo, got nil")
+	}
 }
 
 func TestNormalizeSealPathDotDotPrefixInsideRepo(t *testing.T) {
 	root := t.TempDir()
-	withWorkingDir(t, root, func() {
-		// A file like "..foo/bar" starts with ".." but is inside the repo.
-		path, err := normalizeSealPath(root, "..foo/bar")
-		if err != nil {
-			t.Fatalf("unexpected error for path inside repo starting with '..': %v", err)
-		}
-		if path != filepath.Join("..foo", "bar") {
-			t.Fatalf("got %q, want %q", path, filepath.Join("..foo", "bar"))
-		}
-	})
+	// A file like "..foo/bar" starts with ".." but is inside the repo.
+	path, err := normalizeSealPath(root, "..foo/bar")
+	if err != nil {
+		t.Fatalf("unexpected error for path inside repo starting with '..': %v", err)
+	}
+	if path != filepath.Join("..foo", "bar") {
+		t.Fatalf("got %q, want %q", path, filepath.Join("..foo", "bar"))
+	}
 }
 
 func TestNormalizeSealPathRepoRootItself(t *testing.T) {
 	root := t.TempDir()
-	withWorkingDir(t, root, func() {
-		path, err := normalizeSealPath(root, ".")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if path != "." {
-			t.Fatalf("got %q, want %q", path, ".")
-		}
-	})
+	path, err := normalizeSealPath(root, ".")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != "." {
+		t.Fatalf("got %q, want %q", path, ".")
+	}
 }
 
 func TestReadSealStoreNotExist(t *testing.T) {

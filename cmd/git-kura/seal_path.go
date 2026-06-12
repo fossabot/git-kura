@@ -119,18 +119,15 @@ func acquireSealLock(lockPath string) (release func(), err error) {
 }
 
 // normalizeSealPath converts rawPath to a clean repository-relative path.
-// rawPath must be relative; absolute paths are rejected per spec.
-// Relative paths are resolved against cwd, then made relative to repoRoot.
-// Returns an error if the path escapes the repository.
+// rawPath must be relative and is interpreted relative to the repository
+// root — never the caller's working directory — so the same argument always
+// resolves to the same file. Returns an error for absolute paths and paths
+// that escape the repository.
 func normalizeSealPath(repoRoot, rawPath string) (string, error) {
 	if filepath.IsAbs(rawPath) {
-		return "", fmt.Errorf("path %q must be a relative path", rawPath)
+		return "", fmt.Errorf("path %q must be relative to the repository root", rawPath)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("get working directory: %w", err)
-	}
-	abs := filepath.Clean(filepath.Join(cwd, rawPath))
+	abs := filepath.Clean(filepath.Join(repoRoot, filepath.FromSlash(rawPath)))
 
 	rel, err := filepath.Rel(repoRoot, abs)
 	if err != nil {

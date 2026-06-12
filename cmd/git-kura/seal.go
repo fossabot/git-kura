@@ -62,11 +62,12 @@ const sealAddHelp = `Usage: git kura seal add <path> [path...]
 
 Add one or more file paths to the seal store under the current key (GIT_KURA_SEAL_KEY).
 
-Paths are stored as repository-relative paths.
+Paths are interpreted relative to the repository root, regardless of the
+current working directory. Absolute paths are rejected.
 Exits with error if:
   - GIT_KURA_SEAL_KEY is not set or invalid
-  - any path is outside the repository
-  - any path does not exist
+  - any path is absolute or outside the repository
+  - any path does not exist or is a directory
   - any path is already sealed under a different key
 
 If a path is already sealed under the current key, it is skipped (idempotent).`
@@ -75,9 +76,12 @@ const sealRemoveHelp = `Usage: git kura seal remove <path> [path...]
 
 Remove one or more file paths from the seal store under the current key (GIT_KURA_SEAL_KEY).
 
+Paths are interpreted relative to the repository root, regardless of the
+current working directory. Absolute paths are rejected.
 Exits with error if:
   - GIT_KURA_SEAL_KEY is not set or invalid
-  - any path is outside the repository
+  - any path is absolute or outside the repository
+  - any path is sealed under a different key
 
 Paths not currently in the seal store are skipped (idempotent).`
 

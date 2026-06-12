@@ -699,6 +699,25 @@ func TestSealAddRejectsNonExistentFile(t *testing.T) {
 	requireStderrContains(t, result, "nosuchfile.txt")
 }
 
+func TestSealAddResolvesPathsFromRepoRootNotCwd(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	sub := filepath.Join(repo, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run from the subdirectory: "tracked.txt" must resolve to the file at
+	// the repository root, not sub/tracked.txt (which does not exist).
+	requireExitCode(t, cli.gitKuraWithSealKey(sub, "key1", "seal", "add", "tracked.txt"), 0)
+
+	// The path sealed from the subdirectory is the root file: a different key
+	// is rejected when targeting it from the root.
+	result := cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "tracked.txt")
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "key1")
+}
+
 func TestSealAddRejectsAbsolutePath(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)

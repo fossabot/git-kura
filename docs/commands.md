@@ -139,8 +139,10 @@ git kura seal add src/foo.go
 git kura seal add src/foo.go tests/foo_test.go
 ```
 
-Paths must be relative (not absolute). All paths are validated before any
-change is written — if one path fails, the store is not modified.
+Paths are interpreted relative to the repository root regardless of the
+current working directory; absolute paths are rejected. All paths are
+validated before any change is written — if one path fails, the store is not
+modified.
 
 Exits with `seal-conflict` (code 6) if any path is already sealed by a
 different key. Exits with `seal-lock-timeout` (code 5) if the store lock
