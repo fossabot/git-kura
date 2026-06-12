@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1120,14 +1121,11 @@ func TestFormatAge(t *testing.T) {
 
 // --- seal path store unit tests ---
 
-func TestNormalizeSealPathAbsolute(t *testing.T) {
+func TestNormalizeSealPathAbsoluteRejected(t *testing.T) {
 	root := t.TempDir()
-	path, err := normalizeSealPath(root, filepath.Join(root, "src", "foo.go"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if path != filepath.Join("src", "foo.go") {
-		t.Fatalf("got %q, want %q", path, filepath.Join("src", "foo.go"))
+	_, err := normalizeSealPath(root, filepath.Join(root, "src", "foo.go"))
+	if err == nil {
+		t.Fatal("expected error for absolute path, got nil")
 	}
 }
 
@@ -1153,33 +1151,39 @@ func TestNormalizeSealPathRelative(t *testing.T) {
 
 func TestNormalizeSealPathEscapesRepo(t *testing.T) {
 	root := t.TempDir()
-	_, err := normalizeSealPath(root, filepath.Join(root, "..", "escape.go"))
-	if err == nil {
-		t.Fatal("expected error for path outside repo, got nil")
-	}
+	withWorkingDir(t, root, func() {
+		_, err := normalizeSealPath(root, "../escape.go")
+		if err == nil {
+			t.Fatal("expected error for path outside repo, got nil")
+		}
+	})
 }
 
 func TestNormalizeSealPathDotDotPrefixInsideRepo(t *testing.T) {
 	root := t.TempDir()
-	// A file like "..foo/bar" starts with ".." but is inside the repo.
-	path, err := normalizeSealPath(root, filepath.Join(root, "..foo", "bar"))
-	if err != nil {
-		t.Fatalf("unexpected error for path inside repo starting with '..': %v", err)
-	}
-	if path != filepath.Join("..foo", "bar") {
-		t.Fatalf("got %q, want %q", path, filepath.Join("..foo", "bar"))
-	}
+	withWorkingDir(t, root, func() {
+		// A file like "..foo/bar" starts with ".." but is inside the repo.
+		path, err := normalizeSealPath(root, "..foo/bar")
+		if err != nil {
+			t.Fatalf("unexpected error for path inside repo starting with '..': %v", err)
+		}
+		if path != filepath.Join("..foo", "bar") {
+			t.Fatalf("got %q, want %q", path, filepath.Join("..foo", "bar"))
+		}
+	})
 }
 
 func TestNormalizeSealPathRepoRootItself(t *testing.T) {
 	root := t.TempDir()
-	path, err := normalizeSealPath(root, root)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if path != "." {
-		t.Fatalf("got %q, want %q", path, ".")
-	}
+	withWorkingDir(t, root, func() {
+		path, err := normalizeSealPath(root, ".")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if path != "." {
+			t.Fatalf("got %q, want %q", path, ".")
+		}
+	})
 }
 
 func TestReadSealStoreNotExist(t *testing.T) {
@@ -1261,10 +1265,57 @@ func TestWriteSealStoreMkdirAllFails(t *testing.T) {
 	}
 }
 
-func TestSealStoreFileOutsideRepo(t *testing.T) {
-	_, err := sealStoreFile(t.TempDir())
+func TestSealStorePathsOutsideRepo(t *testing.T) {
+	_, _, err := sealStorePaths(t.TempDir())
 	if err == nil {
-		t.Fatal("sealStoreFile outside git repo: error = nil, want error")
+		t.Fatal("sealStorePaths outside git repo: error = nil, want error")
+	}
+}
+
+func TestAcquireSealLockBasic(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "paths.lock")
+
+	release, err := acquireSealLock(lockPath)
+	if err != nil {
+		t.Fatalf("acquireSealLock: %v", err)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("lock file should exist: %v", err)
+	}
+	release()
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatal("lock file should be removed after release")
+	}
+}
+
+func TestAcquireSealLockTimeout(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "paths.lock")
+
+	// Hold the lock by creating the file manually.
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(lockPath)
+
+	// Use a short timeout for the test.
+	orig := sealStoreLockTimeout
+	sealStoreLockTimeout = 150 * time.Millisecond
+	defer func() { sealStoreLockTimeout = orig }()
+
+	_, err = acquireSealLock(lockPath)
+	if err == nil {
+		t.Fatal("expected lock-timeout error, got nil")
+	}
+	var xe *exitError
+	if !errors.As(err, &xe) || xe.code != exitSealLockTimeout {
+		t.Fatalf("expected exitError with code %d, got: %v", exitSealLockTimeout, err)
+	}
+	if !strings.Contains(err.Error(), "seal-lock-timeout:") {
+		t.Fatalf("expected 'seal-lock-timeout:' prefix in error: %s", err.Error())
 	}
 }
 
@@ -1351,8 +1402,16 @@ func TestCmdSealAddRejectsDifferentKeyInProcess(t *testing.T) {
 		}
 
 		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
-		if err := cmdSealAdd([]string{"tracked.txt"}); err == nil {
+		err := cmdSealAdd([]string{"tracked.txt"})
+		if err == nil {
 			t.Fatal("expected error when adding path under different key, got nil")
+		}
+		var xe *exitError
+		if !errors.As(err, &xe) || xe.code != exitSealConflict {
+			t.Fatalf("expected exitError code %d, got: %v", exitSealConflict, err)
+		}
+		if !strings.Contains(err.Error(), "seal-conflict:") {
+			t.Fatalf("expected 'seal-conflict:' prefix, got: %s", err.Error())
 		}
 	})
 }
@@ -1368,8 +1427,16 @@ func TestCmdSealRemoveRejectsDifferentKeyInProcess(t *testing.T) {
 		}
 
 		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
-		if err := cmdSealRemove([]string{"tracked.txt"}); err == nil {
+		err := cmdSealRemove([]string{"tracked.txt"})
+		if err == nil {
 			t.Fatal("expected error when removing path owned by different key, got nil")
+		}
+		var xe *exitError
+		if !errors.As(err, &xe) || xe.code != exitSealConflict {
+			t.Fatalf("expected exitError code %d, got: %v", exitSealConflict, err)
+		}
+		if !strings.Contains(err.Error(), "seal-conflict:") {
+			t.Fatalf("expected 'seal-conflict:' prefix, got: %s", err.Error())
 		}
 
 		// key1's seal must still be intact
@@ -1398,8 +1465,7 @@ func TestCmdSealAddOutsideRepoInProcess(t *testing.T) {
 
 	withWorkingDir(t, repo, func() {
 		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
-		outside := filepath.Join(repo, "..", "outside.txt")
-		if err := cmdSealAdd([]string{outside}); err == nil {
+		if err := cmdSealAdd([]string{"../outside.txt"}); err == nil {
 			t.Fatal("expected error for path outside repo, got nil")
 		}
 	})
@@ -1447,8 +1513,7 @@ func TestCmdSealRemoveOutsideRepoInProcess(t *testing.T) {
 
 	withWorkingDir(t, repo, func() {
 		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
-		outside := filepath.Join(repo, "..", "outside.txt")
-		if err := cmdSealRemove([]string{outside}); err == nil {
+		if err := cmdSealRemove([]string{"../outside.txt"}); err == nil {
 			t.Fatal("expected error for path outside repo, got nil")
 		}
 	})

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -83,9 +84,28 @@ const lsHelp = `Usage: git kura ls
 
 List all currently open worktrees, one key per line.`
 
+// exitError carries a specific exit code to be used by main.
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e *exitError) Error() string { return e.err.Error() }
+func (e *exitError) Unwrap() error { return e.err }
+
+// Exit codes for seal operations (and future commands).
+const (
+	exitSealLockTimeout = 5
+	exitSealConflict    = 6
+)
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		var xe *exitError
+		if errors.As(err, &xe) {
+			os.Exit(xe.code)
+		}
 		os.Exit(1)
 	}
 }

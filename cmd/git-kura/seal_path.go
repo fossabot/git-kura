@@ -7,25 +7,34 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
 )
 
 const sealPathSchemaVersion = 1
 
-// sealPathStore is the on-disk record written to <git-common-dir>/kura/seals.json.
-// Paths maps each repository-relative file path to the key that sealed it.
+// sealStoreLockTimeout is the maximum time to wait for the seal store lock.
+// Future: make configurable via GIT_KURA_SEAL_LOCK_TIMEOUT or a config file.
+var sealStoreLockTimeout = 5 * time.Second
+
+const sealStoreLockInterval = 100 * time.Millisecond
+
+// sealPathStore is the on-disk record at <git-common-dir>/kura/seals/paths.json.
+// Paths maps each repository-relative path (forward-slash) to the key that sealed it.
 type sealPathStore struct {
 	SchemaVersion int               `json:"schemaVersion"`
-	Paths         map[string]string `json:"paths"` // repo-relative path → key
+	Paths         map[string]string `json:"paths"` // forward-slash repo-relative path → key
 }
 
-func sealStoreFile(repoRoot string) (string, error) {
+// sealStorePaths returns the store file and lock file paths for the given repo root.
+func sealStorePaths(repoRoot string) (storePath, lockPath string, err error) {
 	commonDir, err := gitutil.CommonDir(repoRoot)
 	if err != nil {
-		return "", fmt.Errorf("get git common dir: %w", err)
+		return "", "", fmt.Errorf("get git common dir: %w", err)
 	}
-	return filepath.Join(commonDir, "kura", "seals.json"), nil
+	dir := filepath.Join(commonDir, "kura", "seals")
+	return filepath.Join(dir, "paths.json"), filepath.Join(dir, "paths.lock"), nil
 }
 
 func readSealStore(path string) (sealPathStore, error) {
@@ -62,19 +71,52 @@ func writeSealStore(path string, store sealPathStore) error {
 	return nil
 }
 
+// acquireSealLock creates the lock file using atomic O_CREATE|O_EXCL, retrying
+// until sealStoreLockTimeout (or GIT_KURA_SEAL_LOCK_TIMEOUT if set).
+// Returns a release function that removes the lock file.
+func acquireSealLock(lockPath string) (release func(), err error) {
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create seal store dir: %w", err)
+	}
+	timeout := sealStoreLockTimeout
+	if v := os.Getenv("GIT_KURA_SEAL_LOCK_TIMEOUT"); v != "" {
+		if d, parseErr := time.ParseDuration(v); parseErr == nil {
+			timeout = d
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			_ = f.Close()
+			return func() { _ = os.Remove(lockPath) }, nil
+		}
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("acquire seal store lock: %w", err)
+		}
+		if time.Now().After(deadline) {
+			return nil, &exitError{
+				code: exitSealLockTimeout,
+				err:  fmt.Errorf("seal-lock-timeout: failed to acquire seal store lock after %s", timeout),
+			}
+		}
+		time.Sleep(sealStoreLockInterval)
+	}
+}
+
 // normalizeSealPath converts rawPath to a clean repository-relative path.
-// It resolves relative paths against cwd, then makes them relative to repoRoot.
+// rawPath must be relative; absolute paths are rejected per spec.
+// Relative paths are resolved against cwd, then made relative to repoRoot.
 // Returns an error if the path escapes the repository.
 func normalizeSealPath(repoRoot, rawPath string) (string, error) {
-	abs := rawPath
-	if !filepath.IsAbs(rawPath) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("get working directory: %w", err)
-		}
-		abs = filepath.Join(cwd, rawPath)
+	if filepath.IsAbs(rawPath) {
+		return "", fmt.Errorf("path %q must be a relative path", rawPath)
 	}
-	abs = filepath.Clean(abs)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get working directory: %w", err)
+	}
+	abs := filepath.Clean(filepath.Join(cwd, rawPath))
 
 	rel, err := filepath.Rel(repoRoot, abs)
 	if err != nil {
@@ -109,42 +151,63 @@ func cmdSealAdd(rawPaths []string) error {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	storeFile, err := sealStoreFile(repoRoot)
+	storeFile, lockFile, err := sealStorePaths(repoRoot)
 	if err != nil {
 		return err
 	}
+
+	release, err := acquireSealLock(lockFile)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	store, err := readSealStore(storeFile)
 	if err != nil {
 		return err
 	}
 
-	changed := false
+	// Validate all paths before modifying the store; partial success is not allowed.
+	type entry struct {
+		storeKey string
+		skip     bool // already sealed under current key — idempotent
+	}
+	entries := make([]entry, 0, len(rawPaths))
 	for _, rawPath := range rawPaths {
 		relPath, err := normalizeSealPath(repoRoot, rawPath)
 		if err != nil {
 			return err
 		}
+		storeKey := filepath.ToSlash(relPath)
 
-		absPath := filepath.Join(repoRoot, relPath)
-		if _, err := os.Stat(absPath); err != nil {
+		if _, err := os.Stat(filepath.Join(repoRoot, relPath)); err != nil {
 			if os.IsNotExist(err) {
 				return fmt.Errorf("path %q does not exist", rawPath)
 			}
 			return fmt.Errorf("check path: %w", err)
 		}
 
-		if existingKey, sealed := store.Paths[relPath]; sealed {
+		if existingKey, sealed := store.Paths[storeKey]; sealed {
 			if existingKey != key {
-				return fmt.Errorf("path %q is already sealed under key %q", rawPath, existingKey)
+				return &exitError{
+					code: exitSealConflict,
+					err:  fmt.Errorf("seal-conflict: path %q is already sealed by key %q", rawPath, existingKey),
+				}
 			}
-			continue // idempotent: already sealed under same key
+			entries = append(entries, entry{storeKey: storeKey, skip: true})
+			continue
 		}
-
-		store.Paths[relPath] = key
-		changed = true
+		entries = append(entries, entry{storeKey: storeKey})
 	}
 
+	changed := false
+	for _, e := range entries {
+		if e.skip {
+			continue
+		}
+		store.Paths[e.storeKey] = key
+		changed = true
+	}
 	if !changed {
 		return nil
 	}
@@ -162,35 +225,57 @@ func cmdSealRemove(rawPaths []string) error {
 		return fmt.Errorf("not inside a git repository")
 	}
 
-	storeFile, err := sealStoreFile(repoRoot)
+	storeFile, lockFile, err := sealStorePaths(repoRoot)
 	if err != nil {
 		return err
 	}
+
+	release, err := acquireSealLock(lockFile)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	store, err := readSealStore(storeFile)
 	if err != nil {
 		return err
 	}
 
-	changed := false
+	// Validate all paths before modifying the store; partial success is not allowed.
+	type entry struct {
+		storeKey string
+		skip     bool // not in store — idempotent no-op
+	}
+	entries := make([]entry, 0, len(rawPaths))
 	for _, rawPath := range rawPaths {
 		relPath, err := normalizeSealPath(repoRoot, rawPath)
 		if err != nil {
 			return err
 		}
+		storeKey := filepath.ToSlash(relPath)
 
-		ownerKey, sealed := store.Paths[relPath]
+		ownerKey, sealed := store.Paths[storeKey]
 		if !sealed {
-			continue // idempotent: path not in store
+			entries = append(entries, entry{storeKey: storeKey, skip: true})
+			continue
 		}
 		if ownerKey != key {
-			return fmt.Errorf("path %q is sealed under key %q, not the current key %q", rawPath, ownerKey, key)
+			return &exitError{
+				code: exitSealConflict,
+				err:  fmt.Errorf("seal-conflict: path %q is sealed by key %q, not the current key %q", rawPath, ownerKey, key),
+			}
 		}
-
-		delete(store.Paths, relPath)
-		changed = true
+		entries = append(entries, entry{storeKey: storeKey})
 	}
 
+	changed := false
+	for _, e := range entries {
+		if e.skip {
+			continue
+		}
+		delete(store.Paths, e.storeKey)
+		changed = true
+	}
 	if !changed {
 		return nil
 	}

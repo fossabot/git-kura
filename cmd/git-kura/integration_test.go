@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -647,7 +648,8 @@ func TestSealAddRejectsDifferentKey(t *testing.T) {
 	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
 
 	result := cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "tracked.txt")
-	requireNonZeroExitCode(t, result)
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "seal-conflict:")
 	requireStderrContains(t, result, "key1")
 }
 
@@ -658,7 +660,8 @@ func TestSealRemoveRejectsDifferentKey(t *testing.T) {
 	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
 
 	result := cli.gitKuraWithSealKey(repo, "key2", "seal", "remove", "tracked.txt")
-	requireNonZeroExitCode(t, result)
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "seal-conflict:")
 	requireStderrContains(t, result, "key1")
 }
 
@@ -671,13 +674,52 @@ func TestSealAddRejectsNonExistentFile(t *testing.T) {
 	requireStderrContains(t, result, "nosuchfile.txt")
 }
 
+func TestSealAddRejectsAbsolutePath(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	absPath := filepath.Join(repo, "tracked.txt")
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", absPath)
+	requireNonZeroExitCode(t, result)
+}
+
 func TestSealAddRejectsPathOutsideRepo(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
-	outside := filepath.Join(repo, "..", "outside.txt")
-	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", outside)
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "../outside.txt")
 	requireNonZeroExitCode(t, result)
+}
+
+func TestSealAddLockTimeout(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// Find the lock path and hold it manually.
+	commonDir := strings.TrimSpace(git(t, repo, "rev-parse", "--git-common-dir"))
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(repo, commonDir)
+	}
+	lockPath := filepath.Join(commonDir, "kura", "seals", "paths.lock")
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(lockPath)
+
+	env := filterEnv(filterEnv(append(os.Environ(), "PATH="+cli.envPath), "GIT_KURA_SEAL_KEY"), "GIT_KURA_SEAL_LOCK_TIMEOUT")
+	env = append(env, "GIT_KURA_SEAL_KEY=key1", "GIT_KURA_SEAL_LOCK_TIMEOUT=100ms")
+	cmd := exec.Command("git", "kura", "seal", "add", "tracked.txt")
+	cmd.Dir = repo
+	cmd.Env = env
+	result := runCommand(cmd)
+
+	requireExitCode(t, result, exitSealLockTimeout)
+	requireStderrContains(t, result, "seal-lock-timeout:")
 }
 
 func TestSealRemoveIsIdempotentWhenNotSealed(t *testing.T) {
