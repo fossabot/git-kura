@@ -847,6 +847,81 @@ func TestSealRemoveMissingPathArg(t *testing.T) {
 	requireNonZeroExitCode(t, result)
 }
 
+// --- seal ls integration tests ---
+
+func TestSealLsListsAllKeysIgnoringCurrentSealKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "second.txt"), 0)
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+
+	// ls is repository-wide: a current seal key must not narrow the output.
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "ls")
+	requireExitCode(t, result, 0)
+	requireEmptyStderr(t, result)
+	if want := "key1\ttracked.txt\nkey2\tsecond.txt\n"; result.stdout != want {
+		t.Fatalf("stdout = %q, want %q", result.stdout, want)
+	}
+}
+
+func TestSealLsFiltersByKeyArgument(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "second.txt"), 0)
+
+	result := cli.gitKura(repo, "seal", "ls", "key2")
+	requireExitCode(t, result, 0)
+	if want := "key2\tsecond.txt\n"; result.stdout != want {
+		t.Fatalf("stdout = %q, want %q", result.stdout, want)
+	}
+}
+
+func TestSealLsSeesStoreFromWorktree(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	wt := strings.TrimSpace(cli.gitKura(repo, "get", "51").stdout)
+
+	requireExitCode(t, cli.gitKuraWithSealKey(wt, "51", "seal", "add", "tracked.txt"), 0)
+
+	// The store is shared via the git common dir, so ls shows the same
+	// repository-wide result from the main checkout and from the worktree.
+	for _, dir := range []string{repo, wt} {
+		result := cli.gitKura(dir, "seal", "ls")
+		requireExitCode(t, result, 0)
+		if want := "51\ttracked.txt\n"; result.stdout != want {
+			t.Fatalf("stdout in %s = %q, want %q", dir, result.stdout, want)
+		}
+	}
+}
+
+func TestSealLsEmptyStoreSucceeds(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "ls")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+	requireEmptyStderr(t, result)
+}
+
+func TestSealLsHelpFlag(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "ls", "--help")
+	requireExitCode(t, result, 0)
+	if !strings.Contains(result.stdout, "Usage: git kura seal ls [key]") {
+		t.Fatalf("help output = %s, want usage line", result.stdout)
+	}
+}
+
 func TestSealAddHelpFlag(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)

@@ -161,6 +161,37 @@ Only the key that originally sealed a path may remove it. Attempting to
 remove a path owned by a different key exits with `seal-conflict` (code 6).
 Paths not currently in the store are silently skipped (idempotent).
 
+## `git kura seal ls [key]`
+
+List sealed paths recorded in the seal store, one per line:
+
+```txt
+<key>	<path>
+```
+
+```sh
+git kura seal ls          # every sealed path, across all keys
+git kura seal ls issue-18 # only paths sealed by issue-18
+```
+
+`ls` is a repository-wide inspection command. Unlike `seal add` and
+`seal remove`, it does **not** read `GIT_KURA_SEAL_KEY`: running it inside a
+`seal enter` session shows the same repository-wide result as running it
+outside. To inspect a single key, pass the key as an explicit argument
+(validated with the same rules as `seal enter`). See the ADR
+"Seal Command Current Context and Scope" for the rationale.
+
+The listed scope is the seal store in the Git common dir, shared by all
+worktrees of the repository. Paths are repository-root relative with `/`
+separators. Output is sorted by key, then by path within a key.
+
+An absent store, an empty store, or a key with no sealed paths all produce
+empty output and exit 0. A store that cannot be parsed, has an unsupported
+`schemaVersion`, or does not match the store schema is an error.
+
+`ls` is read-only and does not take the store lock, so it is never blocked
+by a held `paths.lock`.
+
 ## Exit codes
 
 Kura uses stable exit codes so scripts and AI-agent workflows can react
