@@ -199,5 +199,5 @@ If the project changes direction, create a new ADR instead.
 
 ## Template
 
-Use [TEMPLATE.md](docs/adr/TEMPLATE.md)
+Use [TEMPLATE.md](./TEMPLATE.md)
 
