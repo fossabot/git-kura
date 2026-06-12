@@ -1263,3 +1263,292 @@ func TestFindKeyForPathCorruptStoreReturnsError(t *testing.T) {
 		t.Fatal("expected error for corrupt store, got nil")
 	}
 }
+
+func TestFindKeyForPathDirNotExist(t *testing.T) {
+	key, err := findKeyForPath(filepath.Join(t.TempDir(), "nonexistent"), "src/foo.go")
+	if err != nil {
+		t.Fatalf("unexpected error for missing dir: %v", err)
+	}
+	if key != "" {
+		t.Fatalf("got %q, want empty", key)
+	}
+}
+
+// --- cmdSealAdd / cmdSealRemove in-process tests (need a real git repo) ---
+
+func TestCmdSealAddAndRemoveInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+
+		if err := cmdSealAdd("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealAdd: %v", err)
+		}
+		// idempotent: same key, same path
+		if err := cmdSealAdd("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealAdd idempotent: %v", err)
+		}
+		if err := cmdSealRemove("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealRemove: %v", err)
+		}
+		// idempotent: not present
+		if err := cmdSealRemove("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealRemove idempotent: %v", err)
+		}
+	})
+}
+
+func TestCmdSealAddRejectsDifferentKeyInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealAdd("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealAdd: %v", err)
+		}
+
+		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+		if err := cmdSealAdd("tracked.txt"); err == nil {
+			t.Fatal("expected error when adding path under different key, got nil")
+		}
+	})
+}
+
+func TestCmdSealAddNonExistentFileInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealAdd("nosuchfile.txt"); err == nil {
+			t.Fatal("expected error for non-existent file, got nil")
+		}
+	})
+}
+
+func TestCmdSealAddOutsideRepoInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		outside := filepath.Join(repo, "..", "outside.txt")
+		if err := cmdSealAdd(outside); err == nil {
+			t.Fatal("expected error for path outside repo, got nil")
+		}
+	})
+}
+
+func TestCmdSealAddInvalidKeyInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "../../../clobber")
+		if err := cmdSealAdd("tracked.txt"); err == nil {
+			t.Fatal("expected error for invalid seal key, got nil")
+		}
+	})
+}
+
+func TestCmdSealRemoveInvalidKeyInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "../../../clobber")
+		if err := cmdSealRemove("tracked.txt"); err == nil {
+			t.Fatal("expected error for invalid seal key, got nil")
+		}
+	})
+}
+
+func TestCmdSealAddFailsOutsideGitRepo(t *testing.T) {
+	withWorkingDir(t, t.TempDir(), func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealAdd("tracked.txt"); err == nil {
+			t.Fatal("expected error outside git repo, got nil")
+		}
+	})
+}
+
+func TestCmdSealRemoveFailsOutsideGitRepo(t *testing.T) {
+	withWorkingDir(t, t.TempDir(), func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealRemove("tracked.txt"); err == nil {
+			t.Fatal("expected error outside git repo, got nil")
+		}
+	})
+}
+
+func TestCmdSealRemoveOutsideRepoInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		outside := filepath.Join(repo, "..", "outside.txt")
+		if err := cmdSealRemove(outside); err == nil {
+			t.Fatal("expected error for path outside repo, got nil")
+		}
+	})
+}
+
+func TestCmdSealRemoveLastPathDeletesStoreInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealAdd("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealAdd: %v", err)
+		}
+		if err := cmdSealRemove("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealRemove last path: %v", err)
+		}
+		// Store file should be gone; a different key can now seal the same path
+		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+		if err := cmdSealAdd("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealAdd after store deletion: %v", err)
+		}
+	})
+}
+
+func TestCmdSealRemoveFromMultiPathStoreInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealAdd("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealAdd tracked.txt: %v", err)
+		}
+		if err := cmdSealAdd("second.txt"); err != nil {
+			t.Fatalf("cmdSealAdd second.txt: %v", err)
+		}
+		// Remove one path; the store file should persist with the remaining path
+		if err := cmdSealRemove("tracked.txt"); err != nil {
+			t.Fatalf("cmdSealRemove tracked.txt: %v", err)
+		}
+		// second.txt is still sealed under key1
+		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+		if err := cmdSealAdd("second.txt"); err == nil {
+			t.Fatal("expected conflict error for second.txt still sealed under key1, got nil")
+		}
+	})
+}
+
+func TestRunSealAddRemoveInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+
+		if err := run([]string{"seal", "add", "tracked.txt"}); err != nil {
+			t.Fatalf("seal add via run: %v", err)
+		}
+		if err := run([]string{"seal", "remove", "tracked.txt"}); err != nil {
+			t.Fatalf("seal remove via run: %v", err)
+		}
+	})
+}
+
+func TestRunSealAddMissingArgInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := run([]string{"seal", "add"}); err == nil {
+			t.Fatal("expected error for missing path arg, got nil")
+		}
+		if err := run([]string{"seal", "remove"}); err == nil {
+			t.Fatal("expected error for missing path arg, got nil")
+		}
+	})
+}
+
+func TestRunSealAddRemoveHelpInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "add", "--help"})
+		})
+		if err != nil {
+			t.Fatalf("seal add --help: %v", err)
+		}
+		if !strings.Contains(stdout, "GIT_KURA_SEAL_KEY") {
+			t.Fatalf("seal add --help missing GIT_KURA_SEAL_KEY: %s", stdout)
+		}
+
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"seal", "remove", "--help"})
+		})
+		if err != nil {
+			t.Fatalf("seal remove --help: %v", err)
+		}
+		if !strings.Contains(stdout, "GIT_KURA_SEAL_KEY") {
+			t.Fatalf("seal remove --help missing GIT_KURA_SEAL_KEY: %s", stdout)
+		}
+	})
+}
+
+func TestRunSealAddRemoveExtraArgInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := run([]string{"seal", "add", "tracked.txt", "extra"}); err == nil {
+			t.Fatal("expected error for extra argument to seal add, got nil")
+		}
+		if err := run([]string{"seal", "remove", "tracked.txt", "extra"}); err == nil {
+			t.Fatal("expected error for extra argument to seal remove, got nil")
+		}
+	})
+}
+
+func TestSealPathDirOutsideRepo(t *testing.T) {
+	_, err := sealPathDir(t.TempDir())
+	if err == nil {
+		t.Fatal("sealPathDir outside git repo: error = nil, want error")
+	}
+}
+
+func TestWriteSealPathStoreMkdirAllFails(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file where MkdirAll expects to create a directory
+	if err := os.WriteFile(filepath.Join(dir, "not-a-dir"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := writeSealPathStore(filepath.Join(dir, "not-a-dir", "key.json"), sealPathStore{Key: "k"})
+	if err == nil {
+		t.Fatal("expected error when MkdirAll cannot create dir, got nil")
+	}
+}
+
+func TestReadSealPathStoreUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission tests are Unix-specific")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root: permission restrictions don't apply")
+	}
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "unreadable.json")
+	if err := os.WriteFile(storePath, []byte(`{"key":"k"}`), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(storePath, 0o644) }()
+	_, err := readSealPathStore(storePath)
+	if err == nil {
+		t.Fatal("expected error for unreadable file, got nil")
+	}
+}
