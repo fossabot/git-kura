@@ -1,7 +1,7 @@
 # Use Session-local Seal Context for `git kura seal`
 
 * Status: Accepted
-* Created: 2026-06-12T00:00:00Z
+* Created: 2026-06-11T11:46:22Z
 
 ## Context
 
