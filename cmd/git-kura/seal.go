@@ -22,6 +22,8 @@ Subcommands:
   current                        Print the current seal key (GIT_KURA_SEAL_KEY)
   ls                             List all recorded seal sessions
   release                        Remove stale seal sessions
+  add <path> [path...]            Add paths to the seal store under the current key
+  remove <path> [path...]         Remove paths from the seal store under the current key
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
@@ -55,6 +57,33 @@ const sealCurrentHelp = `Usage: git kura seal current
 
 Print the value of GIT_KURA_SEAL_KEY.
 Exits with non-zero if GIT_KURA_SEAL_KEY is not set.`
+
+const sealAddHelp = `Usage: git kura seal add <path> [path...]
+
+Add one or more file paths to the seal store under the current key (GIT_KURA_SEAL_KEY).
+
+Paths are interpreted relative to the repository root, regardless of the
+current working directory. Absolute paths are rejected.
+Exits with error if:
+  - GIT_KURA_SEAL_KEY is not set or invalid
+  - any path is absolute or outside the repository
+  - any path does not exist or is a directory
+  - any path is already sealed under a different key
+
+If a path is already sealed under the current key, it is skipped (idempotent).`
+
+const sealRemoveHelp = `Usage: git kura seal remove <path> [path...]
+
+Remove one or more file paths from the seal store under the current key (GIT_KURA_SEAL_KEY).
+
+Paths are interpreted relative to the repository root, regardless of the
+current working directory. Absolute paths are rejected.
+Exits with error if:
+  - GIT_KURA_SEAL_KEY is not set or invalid
+  - any path is absolute or outside the repository
+  - any path is sealed under a different key
+
+Paths not currently in the seal store are skipped (idempotent).`
 
 type sealEnterArgs struct {
 	Key     string
@@ -116,6 +145,24 @@ func runSeal(args []string) error {
 			return fmt.Errorf("usage: git kura seal release: unexpected argument %q", args[1])
 		}
 		return cmdSealRelease()
+	case "add":
+		if hasHelpFlag(args[1:]) {
+			fmt.Println(sealAddHelp)
+			return nil
+		}
+		if len(args) < 2 {
+			return fmt.Errorf("usage: git kura seal add <path> [path...]")
+		}
+		return cmdSealAdd(args[1:])
+	case "remove":
+		if hasHelpFlag(args[1:]) {
+			fmt.Println(sealRemoveHelp)
+			return nil
+		}
+		if len(args) < 2 {
+			return fmt.Errorf("usage: git kura seal remove <path> [path...]")
+		}
+		return cmdSealRemove(args[1:])
 	default:
 		return fmt.Errorf("unknown seal subcommand: %s", args[0])
 	}

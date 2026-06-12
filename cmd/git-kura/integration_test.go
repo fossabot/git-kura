@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -581,4 +582,289 @@ func TestLsShowsOnlyOpenWorktrees(t *testing.T) {
 	requireExitCode(t, result, 0)
 	requireStdoutContainsLine(t, result, "52")
 	requireStdoutNotContainsLine(t, result, "51")
+}
+
+// --- seal add / remove integration tests ---
+
+func TestSealAddRejectsInvalidEnvKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "../../../clobber", "seal", "add", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "invalid")
+}
+
+func TestSealRemoveRejectsInvalidEnvKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "../../../clobber", "seal", "remove", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "invalid")
+}
+
+func TestSealAddRequiresSealKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "", "seal", "add", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "GIT_KURA_SEAL_KEY")
+}
+
+func TestSealRemoveRequiresSealKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "", "seal", "remove", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "GIT_KURA_SEAL_KEY")
+}
+
+func TestSealAddSucceeds(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+	requireEmptyStderr(t, result)
+}
+
+func TestSealAddIsIdempotent(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt")
+	requireExitCode(t, result, 0)
+}
+
+func TestSealAddRejectsDifferentKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+
+	// The lock is NOT held here: the rejection below is purely a cross-key
+	// seal conflict, not lock contention.
+	requireNoSealLock(t, repo)
+
+	result := cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "tracked.txt")
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "seal-conflict:")
+	requireStderrContains(t, result, "key1")
+}
+
+func TestSealRemoveRejectsDifferentKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+
+	// The lock is NOT held here: the rejection below is purely a cross-key
+	// seal conflict, not lock contention.
+	requireNoSealLock(t, repo)
+
+	result := cli.gitKuraWithSealKey(repo, "key2", "seal", "remove", "tracked.txt")
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "seal-conflict:")
+	requireStderrContains(t, result, "key1")
+}
+
+func TestSealAddConflictListsAllSealedPaths(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "second.txt"), 0)
+	requireNoSealLock(t, repo)
+
+	result := cli.gitKuraWithSealKey(repo, "key3", "seal", "add", "tracked.txt", "second.txt")
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "tracked.txt")
+	requireStderrContains(t, result, "key1")
+	requireStderrContains(t, result, "second.txt")
+	requireStderrContains(t, result, "key2")
+}
+
+func TestSealAddRejectsNonExistentFile(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "nosuchfile.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "nosuchfile.txt")
+}
+
+func TestSealAddResolvesPathsFromRepoRootNotCwd(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	sub := filepath.Join(repo, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run from the subdirectory: "tracked.txt" must resolve to the file at
+	// the repository root, not sub/tracked.txt (which does not exist).
+	requireExitCode(t, cli.gitKuraWithSealKey(sub, "key1", "seal", "add", "tracked.txt"), 0)
+
+	// The path sealed from the subdirectory is the root file: a different key
+	// is rejected when targeting it from the root.
+	result := cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "tracked.txt")
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "key1")
+}
+
+func TestSealAddRejectsAbsolutePath(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	absPath := filepath.Join(repo, "tracked.txt")
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", absPath)
+	requireNonZeroExitCode(t, result)
+}
+
+func TestSealAddRejectsPathOutsideRepo(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "../outside.txt")
+	requireNonZeroExitCode(t, result)
+}
+
+// sealLockFilePath resolves the seal store lock file path for a repository.
+func sealLockFilePath(t *testing.T, repo string) string {
+	t.Helper()
+	commonDir := strings.TrimSpace(git(t, repo, "rev-parse", "--git-common-dir"))
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(repo, commonDir)
+	}
+	return filepath.Join(commonDir, "kura", "seals", "paths.lock")
+}
+
+// requireNoSealLock asserts the seal store lock is not held, so a subsequent
+// failure cannot be caused by lock contention.
+func requireNoSealLock(t *testing.T, repo string) {
+	t.Helper()
+	lockPath := sealLockFilePath(t, repo)
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("seal store lock %s should not exist (stat err: %v)", lockPath, err)
+	}
+}
+
+func TestSealAddLockTimeout(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// Hold the lock manually.
+	lockPath := sealLockFilePath(t, repo)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	defer func() { _ = os.Remove(lockPath) }()
+
+	env := filterEnv(filterEnv(append(os.Environ(), "PATH="+cli.envPath), "GIT_KURA_SEAL_KEY"), "GIT_KURA_SEAL_LOCK_TIMEOUT")
+	env = append(env, "GIT_KURA_SEAL_KEY=key1", "GIT_KURA_SEAL_LOCK_TIMEOUT=100ms")
+	cmd := exec.Command("git", "kura", "seal", "add", "tracked.txt")
+	cmd.Dir = repo
+	cmd.Env = env
+	result := runCommand(cmd)
+
+	requireExitCode(t, result, exitSealLockTimeout)
+	requireStderrContains(t, result, "seal-lock-timeout:")
+}
+
+func TestSealRemoveIsIdempotentWhenNotSealed(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "remove", "tracked.txt")
+	requireExitCode(t, result, 0)
+}
+
+func TestSealRemoveRemovesPath(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "remove", "tracked.txt")
+	requireExitCode(t, result, 0)
+
+	// After removal, a different key can seal the same path
+	result2 := cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "tracked.txt")
+	requireExitCode(t, result2, 0)
+}
+
+func TestSealAddMultiplePaths(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
+
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "tracked.txt"), 0)
+	requireExitCode(t, cli.gitKuraWithSealKey(repo, "key1", "seal", "add", "second.txt"), 0)
+}
+
+func TestSealAddWorksAcrossWorktrees(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	requireExitCode(t, cli.gitKura(repo, "open", "51"), 0)
+	wt := strings.TrimSpace(cli.gitKura(repo, "get", "51").stdout)
+
+	// tracked.txt is committed and present in both the main repo and the worktree
+	result := cli.gitKuraWithSealKey(wt, "51", "seal", "add", "tracked.txt")
+	requireExitCode(t, result, 0)
+
+	// The shared store prevents a different key from sealing the same path
+	result2 := cli.gitKuraWithSealKey(repo, "key2", "seal", "add", "tracked.txt")
+	requireNonZeroExitCode(t, result2)
+	requireStderrContains(t, result2, "51")
+}
+
+func TestSealAddMissingPathArg(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "add")
+	requireNonZeroExitCode(t, result)
+}
+
+func TestSealRemoveMissingPathArg(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "key1", "seal", "remove")
+	requireNonZeroExitCode(t, result)
+}
+
+func TestSealAddHelpFlag(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "", "seal", "add", "--help")
+	requireExitCode(t, result, 0)
+	if !strings.Contains(result.stdout, "GIT_KURA_SEAL_KEY") {
+		t.Fatalf("help output missing GIT_KURA_SEAL_KEY: %s", result.stdout)
+	}
+}
+
+func TestSealRemoveHelpFlag(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKuraWithSealKey(repo, "", "seal", "remove", "--help")
+	requireExitCode(t, result, 0)
+	if !strings.Contains(result.stdout, "GIT_KURA_SEAL_KEY") {
+		t.Fatalf("help output missing GIT_KURA_SEAL_KEY: %s", result.stdout)
+	}
 }

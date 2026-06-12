@@ -129,6 +129,38 @@ Additionally, Kura rejects keys that:
 * contain shell metacharacters
 * contain Git ref expression syntax such as `"@{"`
 
+## `git kura seal add <path> [path...]`
+
+Add one or more repository-relative file paths to the seal store under the
+current key (`GIT_KURA_SEAL_KEY`).
+
+```sh
+git kura seal add src/foo.go
+git kura seal add src/foo.go tests/foo_test.go
+```
+
+Paths are interpreted relative to the repository root regardless of the
+current working directory; absolute paths are rejected. All paths are
+validated before any change is written — if one path fails, the store is not
+modified.
+
+Exits with `seal-conflict` (code 6) if any path is already sealed by a
+different key. Exits with `seal-lock-timeout` (code 5) if the store lock
+cannot be acquired within the retry timeout.
+
+## `git kura seal remove <path> [path...]`
+
+Remove one or more file paths from the seal store.
+
+```sh
+git kura seal remove src/foo.go
+git kura seal remove src/foo.go tests/foo_test.go
+```
+
+Only the key that originally sealed a path may remove it. Attempting to
+remove a path owned by a different key exits with `seal-conflict` (code 6).
+Paths not currently in the store are silently skipped (idempotent).
+
 ## Exit codes
 
 Kura uses stable exit codes so scripts and AI-agent workflows can react
@@ -141,3 +173,9 @@ correctly.
 | 2 | Usage error |
 | 3 | Unsafe operation refused |
 | 4 | Not found |
+| 5 | Seal lock timeout |
+| 6 | Seal conflict |
+
+Exit codes 5 and 6 are signalled by `seal add` and `seal remove`. The stderr
+message always starts with a stable reason token (`seal-lock-timeout:` or
+`seal-conflict:`) that scripts can match without parsing arbitrary text.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -83,10 +84,44 @@ const lsHelp = `Usage: git kura ls
 
 List all currently open worktrees, one key per line.`
 
+// exitError carries a specific exit code to be used by main.
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e *exitError) Error() string { return e.err.Error() }
+func (e *exitError) Unwrap() error { return e.err }
+
+// exitCodeError wraps err with a specific exit code. Returns nil when err is nil
+// so callers can pass through optional errors without a nil check.
+func exitCodeError(code int, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &exitError{code: code, err: err}
+}
+
+// Exit codes for all git kura commands. Keep in sync with the table in
+// docs/commands.md.
+const (
+	exitSuccess         = 0
+	exitGeneralError    = 1
+	exitUsageError      = 2
+	exitUnsafeRefused   = 3
+	exitNotFound        = 4
+	exitSealLockTimeout = 5
+	exitSealConflict    = 6
+)
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		var xe *exitError
+		if errors.As(err, &xe) {
+			os.Exit(xe.code)
+		}
+		os.Exit(exitGeneralError)
 	}
 }
 
