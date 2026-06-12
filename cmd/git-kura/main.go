@@ -93,8 +93,23 @@ type exitError struct {
 func (e *exitError) Error() string { return e.err.Error() }
 func (e *exitError) Unwrap() error { return e.err }
 
-// Exit codes for seal operations (and future commands).
+// exitCodeError wraps err with a specific exit code. Returns nil when err is nil
+// so callers can pass through optional errors without a nil check.
+func exitCodeError(code int, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &exitError{code: code, err: err}
+}
+
+// Exit codes for all git kura commands. Keep in sync with the table in
+// docs/commands.md.
 const (
+	exitSuccess         = 0
+	exitGeneralError    = 1
+	exitUsageError      = 2
+	exitUnsafeRefused   = 3
+	exitNotFound        = 4
 	exitSealLockTimeout = 5
 	exitSealConflict    = 6
 )
@@ -106,7 +121,7 @@ func main() {
 		if errors.As(err, &xe) {
 			os.Exit(xe.code)
 		}
-		os.Exit(1)
+		os.Exit(exitGeneralError)
 	}
 }
 

@@ -24,7 +24,10 @@ are:
   cross-platform consistency.
 - **Symlinks are not resolved** — the path is stored as given (after cleaning).
 - **Non-existent paths are rejected by `seal add`** (the file must exist at
-  add time). `seal remove` does not require the file to exist.
+  add time). `seal remove` works even when the file no longer exists, so a
+  seal can be released after the file is deleted or renamed.
+- **Directories are not seal targets.** `seal add` rejects directories, and
+  recursive directory sealing is a non-goal.
 - Path normalisation is isolated in `normalizeSealPath`.
 
 ## Consequences
@@ -43,3 +46,7 @@ are:
   the store non-portable.
 - **Silently convert absolute paths to relative**: the conversion is implicit
   and surprising; explicit rejection is safer.
+- **Directory (recursive) seals**: seals exist to reserve specific files
+  pin-point; directory seals raise hard questions about recursion scope,
+  files created later, overlap with file seals, and hook-side evaluation,
+  none of which v0 needs to answer.

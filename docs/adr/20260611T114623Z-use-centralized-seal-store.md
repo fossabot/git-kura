@@ -21,8 +21,20 @@ v0 uses a single, centralized store:
 <git-common-dir>/kura/seals/paths.lock   — writer lock (atomic create)
 ```
 
-`paths.json` holds a `map[string]string` from repository-relative path
-(forward-slash separator) to seal key.
+`paths.json` maps each repository-relative path (forward-slash separator) to a
+seal entry object holding the owning key. The entry is an object rather than a
+bare key string so future fields can be added without a schema break:
+
+```json
+{
+  "schemaVersion": 1,
+  "paths": {
+    "src/foo.go": { "key": "issue-18" }
+  }
+}
+```
+
+The store format is described by `cmd/git-kura/schema/seal_store.schema.json`.
 
 `add/remove` acquire `paths.lock` via `O_CREATE|O_EXCL` before reading the
 store, validate all requested paths against the in-memory map, then write the

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // Unit tests cover pure parsing and validation helpers without creating Git
@@ -1228,11 +1230,11 @@ func TestReadSealStoreUnreadable(t *testing.T) {
 
 func TestWriteReadSealStoreRoundtrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "seals.json")
+	path := filepath.Join(dir, "paths.json")
 	original := sealPathStore{
-		Paths: map[string]string{
-			"src/a.go":      "key1",
-			"internal/b.go": "key2",
+		Paths: map[string]sealEntry{
+			"src/a.go":      {Key: "key1"},
+			"internal/b.go": {Key: "key2"},
 		},
 	}
 	if err := writeSealStore(path, original); err != nil {
@@ -1245,11 +1247,54 @@ func TestWriteReadSealStoreRoundtrip(t *testing.T) {
 	if len(got.Paths) != len(original.Paths) {
 		t.Fatalf("round-trip length mismatch: got %d, want %d", len(got.Paths), len(original.Paths))
 	}
-	if got.Paths["src/a.go"] != "key1" || got.Paths["internal/b.go"] != "key2" {
+	if got.Paths["src/a.go"].Key != "key1" || got.Paths["internal/b.go"].Key != "key2" {
 		t.Fatalf("round-trip content mismatch: got %+v", got.Paths)
 	}
 	if got.SchemaVersion != sealPathSchemaVersion {
 		t.Fatalf("schema version: got %d, want %d", got.SchemaVersion, sealPathSchemaVersion)
+	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
+}
+
+func TestWrittenSealStoreConformsToSchema(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "paths.json")
+	store := sealPathStore{
+		Paths: map[string]sealEntry{
+			"src/a.go": {Key: "key1"},
+		},
+	}
+	if err := writeSealStore(path, store); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	schemaDoc, err := jsonschema.UnmarshalJSON(strings.NewReader(readFileString(t, filepath.Join("schema", "seal_store.schema.json"))))
+	if err != nil {
+		t.Fatalf("parse schema: %v", err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("seal_store.schema.json", schemaDoc); err != nil {
+		t.Fatalf("add schema resource: %v", err)
+	}
+	schema, err := compiler.Compile("seal_store.schema.json")
+	if err != nil {
+		t.Fatalf("compile schema: %v", err)
+	}
+
+	inst, err := jsonschema.UnmarshalJSON(strings.NewReader(readFileString(t, path)))
+	if err != nil {
+		t.Fatalf("parse written store: %v", err)
+	}
+	if err := schema.Validate(inst); err != nil {
+		t.Fatalf("written store does not conform to schema: %v", err)
 	}
 }
 
@@ -1259,16 +1304,36 @@ func TestWriteSealStoreMkdirAllFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "not-a-dir"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := writeSealStore(filepath.Join(dir, "not-a-dir", "seals.json"), sealPathStore{Paths: map[string]string{}})
+	err := writeSealStore(filepath.Join(dir, "not-a-dir", "paths.json"), sealPathStore{Paths: map[string]sealEntry{}})
 	if err == nil {
 		t.Fatal("expected error when MkdirAll cannot create dir, got nil")
 	}
 }
 
-func TestSealStorePathsOutsideRepo(t *testing.T) {
-	_, _, err := sealStorePaths(t.TempDir())
+func TestPathsSealStoreOutsideRepo(t *testing.T) {
+	_, _, err := pathsSealStore(t.TempDir())
 	if err == nil {
-		t.Fatal("sealStorePaths outside git repo: error = nil, want error")
+		t.Fatal("pathsSealStore outside git repo: error = nil, want error")
+	}
+}
+
+func TestExitCodeValuesMatchDocs(t *testing.T) {
+	// Keep in sync with the exit code table in docs/commands.md.
+	if exitSuccess != 0 || exitGeneralError != 1 || exitUsageError != 2 ||
+		exitUnsafeRefused != 3 || exitNotFound != 4 ||
+		exitSealLockTimeout != 5 || exitSealConflict != 6 {
+		t.Fatal("exit code constants must match the table in docs/commands.md")
+	}
+}
+
+func TestExitCodeErrorNilPassthrough(t *testing.T) {
+	if err := exitCodeError(exitSealConflict, nil); err != nil {
+		t.Fatalf("exitCodeError(code, nil) = %v, want nil", err)
+	}
+	err := exitCodeError(exitSealConflict, errors.New("boom"))
+	var xe *exitError
+	if !errors.As(err, &xe) || xe.code != exitSealConflict {
+		t.Fatalf("expected exitError with code %d, got: %v", exitSealConflict, err)
 	}
 }
 
@@ -1298,8 +1363,8 @@ func TestAcquireSealLockTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
-	defer os.Remove(lockPath)
+	_ = f.Close()
+	defer func() { _ = os.Remove(lockPath) }()
 
 	// Use a short timeout for the test.
 	orig := sealStoreLockTimeout
@@ -1319,25 +1384,56 @@ func TestAcquireSealLockTimeout(t *testing.T) {
 	}
 }
 
-func TestSealContextEmptyKey(t *testing.T) {
+func TestSealLockReleaseReportsRemoveFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission tests are Unix-specific")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root: permission restrictions don't apply")
+	}
+	dir := filepath.Join(t.TempDir(), "seals")
+	lockPath := filepath.Join(dir, "paths.lock")
+
+	release, err := acquireSealLock(lockPath)
+	if err != nil {
+		t.Fatalf("acquireSealLock: %v", err)
+	}
+
+	// Make the directory read-only so the lock file cannot be removed.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(dir, 0o755) }()
+
+	release() // must not panic; reports the failure on stderr
+
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("lock file should still exist after failed release: %v", err)
+	}
+}
+
+func TestReadSealContextEmptyKey(t *testing.T) {
 	t.Setenv("GIT_KURA_SEAL_KEY", "")
-	_, err := sealContext()
+	_, err := readSealContext()
 	if err == nil {
 		t.Fatal("expected error for empty key, got nil")
 	}
 }
 
-func TestSealContextInvalidKey(t *testing.T) {
+func TestReadSealContextInvalidKey(t *testing.T) {
 	t.Setenv("GIT_KURA_SEAL_KEY", "../../../clobber")
-	_, err := sealContext()
+	_, err := readSealContext()
 	if err == nil {
 		t.Fatal("expected error for invalid key, got nil")
 	}
 }
 
-func TestSealContextValidKey(t *testing.T) {
+func TestReadSealContextValidKey(t *testing.T) {
 	t.Setenv("GIT_KURA_SEAL_KEY", "key1")
-	key, err := sealContext()
+	key, err := readSealContext()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1443,6 +1539,63 @@ func TestCmdSealRemoveRejectsDifferentKeyInProcess(t *testing.T) {
 		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
 		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("seal should still be owned by key1 after failed removal: %v", err)
+		}
+	})
+}
+
+func TestCmdSealAddReportsAllConflictsInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
+	writeFile(t, filepath.Join(repo, "third.txt"), "content\n")
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealAdd tracked.txt: %v", err)
+		}
+		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+		if err := cmdSealAdd([]string{"second.txt"}); err != nil {
+			t.Fatalf("cmdSealAdd second.txt: %v", err)
+		}
+
+		// key3 tries to add all three: the error must list both conflicting
+		// paths with the keys that seal them.
+		t.Setenv("GIT_KURA_SEAL_KEY", "key3")
+		err := cmdSealAdd([]string{"tracked.txt", "second.txt", "third.txt"})
+		if err == nil {
+			t.Fatal("expected conflict error, got nil")
+		}
+		msg := err.Error()
+		for _, want := range []string{"seal-conflict:", "tracked.txt", "key1", "second.txt", "key2"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("conflict error missing %q: %s", want, msg)
+			}
+		}
+
+		// All-or-nothing: third.txt must not have been sealed.
+		t.Setenv("GIT_KURA_SEAL_KEY", "key4")
+		if err := cmdSealAdd([]string{"third.txt"}); err != nil {
+			t.Fatalf("third.txt should not have been sealed by the failed add: %v", err)
+		}
+	})
+}
+
+func TestCmdSealAddRejectsDirectoryInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	if err := os.Mkdir(filepath.Join(repo, "subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		err := cmdSealAdd([]string{"subdir"})
+		if err == nil {
+			t.Fatal("expected error for directory target, got nil")
+		}
+		if !strings.Contains(err.Error(), "directory") {
+			t.Fatalf("expected directory rejection message, got: %v", err)
 		}
 	})
 }
