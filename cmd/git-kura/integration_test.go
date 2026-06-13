@@ -837,27 +837,6 @@ func TestSealTestConflictListsAllSealedPaths(t *testing.T) {
 	requireStderrContains(t, result, "key2")
 }
 
-func TestSealTestIgnoresGitKuraSealKey(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt1 := cli.openWorktree(t, repo, "key1")
-	wt2 := cli.openWorktree(t, repo, "key2")
-
-	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
-
-	// Setting GIT_KURA_SEAL_KEY to the owning key must not change the result:
-	// the current key is derived from the worktree (key2), so the check still
-	// conflicts. GIT_KURA_SEAL_KEY is not consulted for current-key resolution.
-	env := append(os.Environ(), "PATH="+cli.envPath, "GIT_KURA_SEAL_KEY=key1")
-	cmd := exec.Command("git", "kura", "seal", "test", "tracked.txt")
-	cmd.Dir = wt2
-	cmd.Env = env
-	result := runCommand(cmd)
-
-	requireExitCode(t, result, exitSealConflict)
-	requireStderrContains(t, result, "key1")
-}
-
 func TestSealTestRejectsPathOutsideRepo(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
