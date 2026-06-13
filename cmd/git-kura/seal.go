@@ -22,10 +22,6 @@ Subcommands:
   claim <path> [path...]         Claim paths for the current key
   unclaim <path> [path...]       Release the current key's claim on paths
 
-Deprecated aliases (will be removed in a future release):
-  add <path> [path...]           Alias of "claim"
-  remove <path> [path...]        Alias of "unclaim"
-
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
 const sealLsHelp = `Usage: git kura seal ls [key]
@@ -111,24 +107,9 @@ func runSeal(args []string) error {
 		return runSealClaim(args[1:])
 	case "unclaim":
 		return runSealUnclaim(args[1:])
-	case "add":
-		warnDeprecatedSealAlias("add", "claim")
-		return runSealClaim(args[1:])
-	case "remove":
-		warnDeprecatedSealAlias("remove", "unclaim")
-		return runSealUnclaim(args[1:])
 	default:
 		return fmt.Errorf("unknown seal subcommand: %s", args[0])
 	}
-}
-
-// warnDeprecatedSealAlias prints a deprecation notice to stderr when a caller
-// uses a legacy seal subcommand name. The aliases delegate to their
-// replacement so existing callers keep working until the aliases are removed.
-func warnDeprecatedSealAlias(alias, replacement string) {
-	fmt.Fprintf(os.Stderr,
-		"warning: \"git kura seal %s\" is deprecated; use \"git kura seal %s\" instead\n",
-		alias, replacement)
 }
 
 func runSealClaim(args []string) error {

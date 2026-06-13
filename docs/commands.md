@@ -181,13 +181,6 @@ Only the key that claimed a path may release it. Attempting to unclaim a path
 claimed by a different key exits with `seal-conflict` (code 6). Paths not
 currently claimed are silently skipped (idempotent).
 
-## Deprecated aliases: `seal add` / `seal remove`
-
-`git kura seal add` and `git kura seal remove` are deprecated aliases of
-`seal claim` and `seal unclaim` respectively. They behave identically to their
-replacements but print a deprecation warning to stderr, and will be removed in
-a future release. Prefer `claim` / `unclaim` in scripts and agent workflows.
-
 ## `git kura seal ls [key]`
 
 List claimed paths recorded in the seal store, one per line:

@@ -746,53 +746,34 @@ func TestSealUnclaimMissingPathArg(t *testing.T) {
 	requireNonZeroExitCode(t, result)
 }
 
-// --- deprecated seal add / remove alias integration tests ---
+// --- removed seal add / remove subcommand integration tests ---
 
-// TestSealAddAliasDelegatesToClaim verifies the legacy "seal add" still claims
-// the path (delegating to claim) while emitting a deprecation warning.
-func TestSealAddAliasDelegatesToClaim(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt1 := cli.openWorktree(t, repo, "key1")
-	wt2 := cli.openWorktree(t, repo, "key2")
-
-	result := cli.gitKura(wt1, "seal", "add", "tracked.txt")
-	requireExitCode(t, result, 0)
-	requireStderrContains(t, result, "deprecated")
-	requireStderrContains(t, result, "claim")
-
-	// The path is genuinely claimed: a different key is now rejected, and the
-	// claim is recorded under key1.
-	result2 := cli.gitKura(wt2, "seal", "add", "tracked.txt")
-	requireExitCode(t, result2, exitSealConflict)
-	requireStderrContains(t, result2, "key1")
-
-	ls := cli.gitKura(repo, "seal", "ls")
-	requireExitCode(t, ls, 0)
-	if want := "key1\ttracked.txt\n"; ls.stdout != want {
-		t.Fatalf("ls stdout = %q, want %q", ls.stdout, want)
-	}
-}
-
-// TestSealRemoveAliasDelegatesToUnclaim verifies the legacy "seal remove" still
-// releases the claim (delegating to unclaim) while emitting a deprecation
-// warning.
-func TestSealRemoveAliasDelegatesToUnclaim(t *testing.T) {
+// TestSealAddSubcommandRemoved asserts the old "seal add" verb is gone: it is
+// not an alias of "claim", it is simply an unknown subcommand.
+func TestSealAddSubcommandRemoved(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt := cli.openWorktree(t, repo, "key1")
 
-	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "tracked.txt"), 0)
+	result := cli.gitKura(wt, "seal", "add", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "unknown seal subcommand")
 
-	result := cli.gitKura(wt, "seal", "remove", "tracked.txt")
-	requireExitCode(t, result, 0)
-	requireStderrContains(t, result, "deprecated")
-	requireStderrContains(t, result, "unclaim")
-
-	// The claim is gone: nothing left in the store.
+	// Nothing was written to the store.
 	ls := cli.gitKura(repo, "seal", "ls")
 	requireExitCode(t, ls, 0)
 	requireEmptyStdout(t, ls)
+}
+
+// TestSealRemoveSubcommandRemoved asserts the old "seal remove" verb is gone.
+func TestSealRemoveSubcommandRemoved(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	result := cli.gitKura(wt, "seal", "remove", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "unknown seal subcommand")
 }
 
 // --- seal ls integration tests ---
