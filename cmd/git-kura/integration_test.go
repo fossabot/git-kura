@@ -746,36 +746,6 @@ func TestSealUnclaimMissingPathArg(t *testing.T) {
 	requireNonZeroExitCode(t, result)
 }
 
-// --- removed seal add / remove subcommand integration tests ---
-
-// TestSealAddSubcommandRemoved asserts the old "seal add" verb is gone: it is
-// not an alias of "claim", it is simply an unknown subcommand.
-func TestSealAddSubcommandRemoved(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt := cli.openWorktree(t, repo, "key1")
-
-	result := cli.gitKura(wt, "seal", "add", "tracked.txt")
-	requireNonZeroExitCode(t, result)
-	requireStderrContains(t, result, "unknown seal subcommand")
-
-	// Nothing was written to the store.
-	ls := cli.gitKura(repo, "seal", "ls")
-	requireExitCode(t, ls, 0)
-	requireEmptyStdout(t, ls)
-}
-
-// TestSealRemoveSubcommandRemoved asserts the old "seal remove" verb is gone.
-func TestSealRemoveSubcommandRemoved(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt := cli.openWorktree(t, repo, "key1")
-
-	result := cli.gitKura(wt, "seal", "remove", "tracked.txt")
-	requireNonZeroExitCode(t, result)
-	requireStderrContains(t, result, "unknown seal subcommand")
-}
-
 // --- seal ls integration tests ---
 
 func TestSealLsListsAllKeysIgnoringCurrentWorktree(t *testing.T) {
