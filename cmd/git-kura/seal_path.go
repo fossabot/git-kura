@@ -353,3 +353,61 @@ func cmdSealUnclaim(rawPaths []string) error {
 	}
 	return writeSealStore(storeFile, store)
 }
+
+// cmdSealTest checks whether every path in rawPaths may be handled in the
+// current seal context without modifying the store. It is read-only and does
+// not take paths.lock, so a held lock never blocks it (mirroring cmdSealLs).
+//
+// A path is safe when it is unclaimed or already claimed by the current key.
+// A path inside the repository that does not exist yet is treated as
+// unclaimed, so the check can be run before creating a new file. A path
+// claimed by a different key is a conflict; all conflicts are collected so the
+// error reports every conflicting path with the key that claims it. Failure to
+// derive the current key (running outside a managed worktree, or with missing
+// or inconsistent metadata) is reported as a context error distinct from the
+// seal-conflict error.
+func cmdSealTest(rawPaths []string) error {
+	key, err := readSealContext()
+	if err != nil {
+		return err
+	}
+
+	repoRoot, err := gitutil.RepoRoot()
+	if err != nil {
+		return fmt.Errorf("not inside a git repository")
+	}
+
+	storeFile, _, err := pathsSealStore(repoRoot)
+	if err != nil {
+		return err
+	}
+
+	store, err := readSealStore(storeFile)
+	if err != nil {
+		return err
+	}
+
+	var conflicts []sealConflict
+	for _, rawPath := range rawPaths {
+		relPath, err := normalizeSealPath(repoRoot, rawPath)
+		if err != nil {
+			return err
+		}
+		storeKey := filepath.ToSlash(relPath)
+
+		entry, sealed := store.Paths[storeKey]
+		if !sealed {
+			// Unclaimed (including not-yet-created paths) is safe.
+			continue
+		}
+		if entry.Key != key {
+			conflicts = append(conflicts, sealConflict{path: rawPath, sealedBy: entry.Key})
+		}
+		// Claimed by the current key: safe.
+	}
+
+	if len(conflicts) > 0 {
+		return sealConflictError(conflicts)
+	}
+	return nil
+}

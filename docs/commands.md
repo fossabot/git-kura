@@ -23,6 +23,7 @@ git kura close fizz             # remove the worktree for "fizz"
 git kura ls                     # list all open worktrees
 git kura seal claim <path...>   # claim paths for the current seal key
 git kura seal unclaim <path...> # release the current seal key's claim on paths
+git kura seal test <path...>    # check paths against the current seal context
 git kura seal ls [key]          # list claimed paths (project-wide by default)
 ```
 
@@ -181,6 +182,42 @@ Only the key that claimed a path may release it. Attempting to unclaim a path
 claimed by a different key exits with `seal-conflict` (code 6). Paths not
 currently claimed are silently skipped (idempotent).
 
+## `git kura seal test <path> [path...]`
+
+Check whether one or more repository-relative paths may be handled in the
+current seal context, without modifying the store. `seal test` answers a single
+question: given the current key, is every listed path safe to edit?
+
+The current key is derived from the git-kura managed worktree you run the
+command in, exactly like `seal claim` / `seal unclaim`:
+
+```sh
+cd "$(git kura get issue-18)"
+git kura seal test src/foo.go
+git kura seal test src/foo.go tests/foo_test.go
+```
+
+`seal test` fails when it is not run inside a managed worktree, or when that
+worktree's metadata is missing or inconsistent. This context error is distinct
+from a seal conflict. `GIT_KURA_SEAL_KEY` is **not** consulted for current-key
+resolution and does not affect the result.
+
+A path is safe when it is unclaimed, or already claimed by the current key. A
+path claimed by a different key is a conflict. Paths are interpreted relative to
+the repository root regardless of the current working directory; absolute paths
+and paths outside the repository are rejected. A path inside the repository that
+does not exist yet is treated as unclaimed, so `seal test` can check a file
+before it is created.
+
+`seal test` exits 0 only when every path is safe. If any path conflicts it exits
+with `seal-conflict` (code 6) and reports each conflicting path with the key that
+claims it. `seal test` is read-only: it does not modify the store and does not
+take the store lock, so it is never blocked by a held `paths.lock`.
+
+In v0 `seal test` takes no options. `--all`, `--unsealed`, and `--staged` are
+not defined and are rejected; project-wide validation (checking paths without a
+current key) is intentionally out of scope.
+
 ## `git kura seal ls [key]`
 
 List claimed paths recorded in the seal store, one per line:
@@ -228,6 +265,7 @@ correctly.
 | 5 | Seal lock timeout |
 | 6 | Seal conflict |
 
-Exit codes 5 and 6 are signalled by `seal claim` and `seal unclaim`. The stderr
-message always starts with a stable reason token (`seal-lock-timeout:` or
+Exit code 5 is signalled by `seal claim` and `seal unclaim`. Exit code 6 is
+signalled by `seal claim`, `seal unclaim`, and `seal test`. The stderr message
+always starts with a stable reason token (`seal-lock-timeout:` or
 `seal-conflict:`) that scripts can match without parsing arbitrary text.

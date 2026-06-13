@@ -746,6 +746,136 @@ func TestSealUnclaimMissingPathArg(t *testing.T) {
 	requireNonZeroExitCode(t, result)
 }
 
+// --- seal test integration tests ---
+
+func TestSealTestOutsideWorktreeFails(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// The main checkout is a git repository but not a managed worktree. The
+	// failure must be a context error, distinguishable from a seal-conflict.
+	result := cli.gitKura(repo, "seal", "test", "tracked.txt")
+	requireNonZeroExitCode(t, result)
+	requireStderrContains(t, result, "managed worktree")
+	if strings.Contains(result.stderr, "seal-conflict:") {
+		t.Fatalf("context error must not look like a seal-conflict: %s", result.stderr)
+	}
+}
+
+func TestSealTestUnsealedSucceeds(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	result := cli.gitKura(wt, "seal", "test", "tracked.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+	requireEmptyStderr(t, result)
+}
+
+func TestSealTestNonExistentPathSucceeds(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	// A path inside the repository that does not exist yet is unclaimed, so the
+	// check passes — supporting pre-create checks.
+	result := cli.gitKura(wt, "seal", "test", "new-file.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+}
+
+func TestSealTestCurrentKeySucceeds(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	requireExitCode(t, cli.gitKura(wt, "seal", "claim", "tracked.txt"), 0)
+
+	result := cli.gitKura(wt, "seal", "test", "tracked.txt")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+}
+
+func TestSealTestRejectsDifferentKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "key1")
+	wt2 := cli.openWorktree(t, repo, "key2")
+
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+
+	// The lock is NOT held here: the rejection below is purely a cross-key
+	// seal conflict, not lock contention.
+	requireNoSealLock(t, repo)
+
+	result := cli.gitKura(wt2, "seal", "test", "tracked.txt")
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "seal-conflict:")
+	requireStderrContains(t, result, "key1")
+}
+
+func TestSealTestConflictListsAllSealedPaths(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	commitFile(t, repo, "second.txt", "content\n")
+	commitFile(t, repo, "third.txt", "content\n")
+	wt1 := cli.openWorktree(t, repo, "key1")
+	wt2 := cli.openWorktree(t, repo, "key2")
+	wt3 := cli.openWorktree(t, repo, "key3")
+
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+	requireExitCode(t, cli.gitKura(wt2, "seal", "claim", "second.txt"), 0)
+	requireNoSealLock(t, repo)
+
+	// third.txt is safe; the two foreign claims must both be reported.
+	result := cli.gitKura(wt3, "seal", "test", "tracked.txt", "second.txt", "third.txt")
+	requireExitCode(t, result, exitSealConflict)
+	requireStderrContains(t, result, "tracked.txt")
+	requireStderrContains(t, result, "key1")
+	requireStderrContains(t, result, "second.txt")
+	requireStderrContains(t, result, "key2")
+}
+
+func TestSealTestRejectsPathOutsideRepo(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	result := cli.gitKura(wt, "seal", "test", "../outside.txt")
+	requireNonZeroExitCode(t, result)
+}
+
+func TestSealTestRejectsUndefinedOptions(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := cli.openWorktree(t, repo, "key1")
+
+	for _, opt := range []string{"--all", "--unsealed", "--staged"} {
+		result := cli.gitKura(wt, "seal", "test", opt, "tracked.txt")
+		requireNonZeroExitCode(t, result)
+	}
+}
+
+func TestSealTestMissingPathArg(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "test")
+	requireNonZeroExitCode(t, result)
+}
+
+func TestSealTestHelpFlag(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "test", "--help")
+	requireExitCode(t, result, 0)
+	if !strings.Contains(result.stdout, "Usage: git kura seal test") {
+		t.Fatalf("help output = %s, want usage line", result.stdout)
+	}
+}
+
 // --- seal ls integration tests ---
 
 func TestSealLsListsAllKeysIgnoringCurrentWorktree(t *testing.T) {

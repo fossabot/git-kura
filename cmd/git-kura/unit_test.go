@@ -1174,3 +1174,222 @@ func TestRunSealClaimUnclaimHelpInProcess(t *testing.T) {
 		}
 	})
 }
+
+// --- cmdSealTest in-process tests (need a real git repo) ---
+
+func TestCmdSealTestUnsealedSucceedsInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		if err := cmdSealTest([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealTest on unsealed path: %v", err)
+		}
+	})
+}
+
+func TestCmdSealTestNonExistentPathSucceedsInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	// A path inside the repository that does not exist is treated as unclaimed,
+	// so it can be checked before the file is created.
+	withWorkingDir(t, wt, func() {
+		if err := cmdSealTest([]string{"new-file.txt"}); err != nil {
+			t.Fatalf("cmdSealTest on non-existent in-repo path: %v", err)
+		}
+	})
+}
+
+func TestCmdSealTestCurrentKeySucceedsInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
+		}
+		// A path claimed by the current key is safe.
+		if err := cmdSealTest([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealTest on own claim: %v", err)
+		}
+	})
+}
+
+func TestCmdSealTestRejectsDifferentKeyInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
+
+	withWorkingDir(t, wt1, func() {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
+		}
+	})
+
+	withWorkingDir(t, wt2, func() {
+		err := cmdSealTest([]string{"tracked.txt"})
+		if err == nil {
+			t.Fatal("expected conflict error for path claimed by different key, got nil")
+		}
+		var xe *exitError
+		if !errors.As(err, &xe) || xe.code != exitSealConflict {
+			t.Fatalf("expected exitError code %d, got: %v", exitSealConflict, err)
+		}
+		for _, want := range []string{"seal-conflict:", "tracked.txt", "key1"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("conflict error missing %q: %s", want, err.Error())
+			}
+		}
+	})
+}
+
+func TestCmdSealTestReportsAllConflictsInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	commitFile(t, repo, "second.txt", "content\n")
+	commitFile(t, repo, "third.txt", "content\n")
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
+	wt3 := openManagedWorktree(t, repo, "key3")
+
+	withWorkingDir(t, wt1, func() {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim tracked.txt: %v", err)
+		}
+	})
+	withWorkingDir(t, wt2, func() {
+		if err := cmdSealClaim([]string{"second.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim second.txt: %v", err)
+		}
+	})
+
+	// key3 tests all three: third.txt is safe, but the two foreign claims must
+	// both be reported with the keys that hold them.
+	withWorkingDir(t, wt3, func() {
+		err := cmdSealTest([]string{"tracked.txt", "second.txt", "third.txt"})
+		if err == nil {
+			t.Fatal("expected conflict error, got nil")
+		}
+		for _, want := range []string{"seal-conflict:", "tracked.txt", "key1", "second.txt", "key2"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("conflict error missing %q: %s", want, err.Error())
+			}
+		}
+	})
+}
+
+func TestCmdSealTestDoesNotMutateStoreInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		if err := cmdSealTest([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealTest: %v", err)
+		}
+	})
+
+	// seal test is read-only: it must not create the store file.
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	if _, err := os.Stat(storeFile); !os.IsNotExist(err) {
+		t.Fatalf("seal store %s should not exist after seal test (stat err: %v)", storeFile, err)
+	}
+}
+
+func TestCmdSealTestOutsideRepoPathInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		if err := cmdSealTest([]string{"../outside.txt"}); err == nil {
+			t.Fatal("expected error for path outside repo, got nil")
+		}
+	})
+}
+
+func TestCmdSealTestFailsOutsideManagedWorktreeInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// The main checkout is a git repo but not a managed worktree: the context
+	// error must be distinct from a seal-conflict.
+	withWorkingDir(t, repo, func() {
+		err := cmdSealTest([]string{"tracked.txt"})
+		if err == nil {
+			t.Fatal("expected error outside a managed worktree, got nil")
+		}
+		if strings.Contains(err.Error(), "seal-conflict:") {
+			t.Fatalf("context error must not look like a seal-conflict: %s", err.Error())
+		}
+		var xe *exitError
+		if errors.As(err, &xe) && xe.code == exitSealConflict {
+			t.Fatalf("context error must not carry the seal-conflict exit code: %v", err)
+		}
+	})
+}
+
+func TestRunSealTestInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		if err := run([]string{"seal", "test", "tracked.txt"}); err != nil {
+			t.Fatalf("seal test via run: %v", err)
+		}
+	})
+}
+
+func TestRunSealTestMissingArgInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		if err := run([]string{"seal", "test"}); err == nil {
+			t.Fatal("expected error for missing path arg, got nil")
+		}
+	})
+}
+
+func TestRunSealTestRejectsUndefinedOptionsInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	// --all / --unsealed / --staged are not defined in v0 and must error. The
+	// option check happens before the seal context is resolved, but run it from
+	// the worktree so a context failure can't mask an accepted option.
+	withWorkingDir(t, wt, func() {
+		for _, opt := range []string{"--all", "--unsealed", "--staged"} {
+			if err := run([]string{"seal", "test", opt, "tracked.txt"}); err == nil {
+				t.Fatalf("expected error for undefined option %q, got nil", opt)
+			}
+		}
+	})
+}
+
+func TestRunSealTestHelpInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "test", "--help"})
+		})
+		if err != nil {
+			t.Fatalf("seal test --help: %v", err)
+		}
+		if !strings.Contains(stdout, "managed worktree") {
+			t.Fatalf("seal test --help should describe worktree-derived key resolution: %s", stdout)
+		}
+	})
+}

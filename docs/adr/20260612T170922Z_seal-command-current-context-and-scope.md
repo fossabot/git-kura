@@ -5,16 +5,24 @@
 - Amended: 2026-06-13
 
 > **Partially superseded.** The read-only-vs-mutation classification this ADR
-> establishes still holds: `seal ls` is repository-wide and ignores the current
-> key, while `seal add` / `seal remove` require a current seal key. However, the
-> mechanism described here for *establishing* that key — `git kura seal enter <key>`
-> setting `GIT_KURA_SEAL_KEY` for a child shell — has been withdrawn, along with the
-> `seal session ls` / `seal session clean` inspection and maintenance commands, in
-> [#29](https://github.com/tooppoo/git-kura/issues/29). The current key is now intended
-> to be derived from the active git-kura managed worktree; `GIT_KURA_SEAL_KEY` survives
-> only as an internal compatibility shim until [#32](https://github.com/tooppoo/git-kura/issues/32)
-> replaces the current-key resolution. Treat the `seal enter` / `seal session ...`
-> references below as historical context, not current design.
+> establishes still holds, and it now governs the implemented commands: `seal ls`
+> is repository-wide and ignores the current key, while `seal claim` /
+> `seal unclaim` (the renamed `seal add` / `seal remove`) and `seal test` require
+> a current seal key. However, the mechanism described here for *establishing*
+> that key — `git kura seal enter <key>` setting `GIT_KURA_SEAL_KEY` for a child
+> shell — has been withdrawn, along with the `seal session ls` /
+> `seal session clean` inspection and maintenance commands, in
+> [#29](https://github.com/tooppoo/git-kura/issues/29). The current key is derived
+> from the active git-kura managed worktree per
+> [`2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md`](2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md).
+> `GIT_KURA_SEAL_KEY` no longer participates in current-key resolution at all:
+> [#32](https://github.com/tooppoo/git-kura/issues/32) moved `claim` / `unclaim`
+> onto worktree-derived keys, and [#20](https://github.com/tooppoo/git-kura/issues/20)
+> implemented `seal test` the same way. Wherever this ADR conditions behavior on
+> `GIT_KURA_SEAL_KEY` being set, unset, or invalid, read it as "the worktree-derived
+> current key" instead. Treat the `seal enter` / `seal session ...` references and
+> the `seal add` / `seal remove` names below as historical context, not current
+> design.
 
 ## Context
 
