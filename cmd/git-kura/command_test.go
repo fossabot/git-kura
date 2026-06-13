@@ -81,7 +81,10 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"seal", "enter", "key", "--"},
 		{"seal", "current", "extra"},
 		{"seal", "unknown"},
-		{"seal", "ls", "extra"},
+		{"seal", "ls", "key1", "key2"},
+		{"seal", "ls", "--all"},
+		{"seal", "ls", "--key", "key1"},
+		{"seal", "ls", "..invalid"},
 		{"seal", "release", "extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -494,92 +497,168 @@ func TestRunLsInProcess(t *testing.T) {
 	})
 }
 
+// seedSealStore writes the given path→entry map to the repository's seal
+// store and returns the store file path.
+func seedSealStore(t *testing.T, repo string, paths map[string]sealEntry) string {
+	t.Helper()
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	if err := writeSealStore(storeFile, sealPathStore{Paths: paths}); err != nil {
+		t.Fatalf("writeSealStore: %v", err)
+	}
+	return storeFile
+}
+
 func TestCmdSealLsEmpty(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
 	withWorkingDir(t, repo, func() {
+		// No paths.json at all → empty store, exit 0, empty stdout.
 		stdout, err := captureStdout(t, func() error {
 			return run([]string{"seal", "ls"})
 		})
 		if err != nil {
 			t.Fatalf("seal ls error = %v, want nil", err)
 		}
-		if !strings.Contains(stdout, "key") {
-			t.Fatalf("stdout = %q, want header row containing 'key'", stdout)
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+
+		// Store exists but has no sealed paths → same result.
+		seedSealStore(t, repo, map[string]sealEntry{})
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"seal", "ls"})
+		})
+		if err != nil {
+			t.Fatalf("seal ls error = %v, want nil", err)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
 		}
 	})
 }
 
-func TestCmdSealLsWithSessions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PID liveness uses kill(0) which is Unix-specific")
-	}
-
+func TestCmdSealLsListsAllKeysSorted(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
 	withWorkingDir(t, repo, func() {
-		sessDir, err := sealSessionDir(repo)
-		if err != nil {
-			t.Fatalf("sealSessionDir: %v", err)
-		}
-
-		writeSealSessionFile(t, sessDir, sealSession{
-			Key: "active-key", WorktreePath: "/wt-active",
-			ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: time.Now(),
+		seedSealStore(t, repo, map[string]sealEntry{
+			"src/z.go":      {Key: "key1"},
+			"src/a.go":      {Key: "key1"},
+			"docs/guide.md": {Key: "key2"},
 		})
 
-		dead := deadPIDForTest(t)
-		writeSealSessionFile(t, sessDir, sealSession{
-			Key: "stale-key", WorktreePath: "/wt-stale",
-			ParentPID: dead, StartedAt: time.Now().Add(-10 * time.Minute),
-		})
-
+		// ls must show every key even when a current seal key is set.
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
 		stdout, err := captureStdout(t, func() error {
 			return run([]string{"seal", "ls"})
 		})
 		if err != nil {
 			t.Fatalf("seal ls error = %v, want nil", err)
 		}
-		for _, want := range []string{"active-key", "stale-key", sessionStatusStale} {
-			if !strings.Contains(stdout, want) {
-				t.Fatalf("stdout = %q, want it to contain %q", stdout, want)
-			}
+		want := "key1\tsrc/a.go\nkey1\tsrc/z.go\nkey2\tdocs/guide.md\n"
+		if stdout != want {
+			t.Fatalf("stdout = %q, want %q", stdout, want)
 		}
 	})
 }
 
-func TestCmdSealLsTTLExceeded(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PID liveness uses kill(0) which is Unix-specific")
-	}
-
+func TestCmdSealLsFiltersByKey(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
 	withWorkingDir(t, repo, func() {
-		sessDir, err := sealSessionDir(repo)
-		if err != nil {
-			t.Fatalf("sealSessionDir: %v", err)
-		}
-
-		// Alive PIDs but started long ago → stale-candidate
-		writeSealSessionFile(t, sessDir, sealSession{
-			Key: "old-key", WorktreePath: "/wt-old",
-			ParentPID: os.Getpid(), ChildPID: os.Getpid(),
-			StartedAt: time.Now().Add(-10 * time.Minute),
+		seedSealStore(t, repo, map[string]sealEntry{
+			"src/a.go":      {Key: "key1"},
+			"docs/guide.md": {Key: "key2"},
 		})
 
-		t.Setenv("GIT_KURA_SESSION_TTL", "5m")
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "ls", "key2"})
+		})
+		if err != nil {
+			t.Fatalf("seal ls key2 error = %v, want nil", err)
+		}
+		if want := "key2\tdocs/guide.md\n"; stdout != want {
+			t.Fatalf("stdout = %q, want %q", stdout, want)
+		}
+
+		// A key with no sealed paths is not an error: empty stdout, exit 0.
+		stdout, err = captureStdout(t, func() error {
+			return run([]string{"seal", "ls", "key3"})
+		})
+		if err != nil {
+			t.Fatalf("seal ls key3 error = %v, want nil", err)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+	})
+}
+
+func TestCmdSealLsInvalidStore(t *testing.T) {
+	for name, content := range map[string]string{
+		"not json":            `{`,
+		"wrong schemaVersion": `{"schemaVersion":2,"paths":{}}`,
+		"bad structure":       `{"schemaVersion":1,"paths":{"src/a.go":"key1"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cli := newTestCLI(t)
+			repo := cli.initRepo(t)
+
+			withWorkingDir(t, repo, func() {
+				storeFile, _, err := pathsSealStore(repo)
+				if err != nil {
+					t.Fatalf("pathsSealStore: %v", err)
+				}
+				if err := os.MkdirAll(filepath.Dir(storeFile), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(storeFile, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := run([]string{"seal", "ls"}); err == nil {
+					t.Fatal("seal ls with invalid store error = nil, want error")
+				}
+			})
+		})
+	}
+}
+
+func TestCmdSealLsDoesNotBlockOnLock(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		seedSealStore(t, repo, map[string]sealEntry{
+			"src/a.go": {Key: "key1"},
+		})
+
+		_, lockFile, err := pathsSealStore(repo)
+		if err != nil {
+			t.Fatalf("pathsSealStore: %v", err)
+		}
+		if err := os.WriteFile(lockFile, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Remove(lockFile) }) //nolint:errcheck
+
+		// If ls (incorrectly) tried to take the lock, it would time out and
+		// fail; with the lock held it must still list immediately.
+		t.Setenv("GIT_KURA_SEAL_LOCK_TIMEOUT", "100ms")
 		stdout, err := captureStdout(t, func() error {
 			return run([]string{"seal", "ls"})
 		})
 		if err != nil {
-			t.Fatalf("seal ls error = %v, want nil", err)
+			t.Fatalf("seal ls with held lock error = %v, want nil", err)
 		}
-		if !strings.Contains(stdout, "ttl") {
-			t.Fatalf("stdout = %q, want it to contain 'ttl' for stale-candidate", stdout)
+		if want := "key1\tsrc/a.go\n"; stdout != want {
+			t.Fatalf("stdout = %q, want %q", stdout, want)
 		}
 	})
 }
@@ -686,36 +765,6 @@ func TestCmdSealReleaseKeepsTTLOnlyStale(t *testing.T) {
 
 		if _, statErr := os.Stat(ttlPath); statErr != nil {
 			t.Fatalf("ttl-exceeded-but-alive session was unexpectedly deleted: %v", statErr)
-		}
-	})
-}
-
-func TestCmdSealLsShowsCorrupt(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	withWorkingDir(t, repo, func() {
-		sessDir, err := sealSessionDir(repo)
-		if err != nil {
-			t.Fatalf("sealSessionDir: %v", err)
-		}
-		if err := os.MkdirAll(sessDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		corruptPath := filepath.Join(sessDir, "corrupt.json")
-		if err := os.WriteFile(corruptPath, []byte("not json"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { os.Remove(corruptPath) }) //nolint:errcheck
-
-		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "ls"})
-		})
-		if err != nil {
-			t.Fatalf("seal ls error = %v, want nil", err)
-		}
-		if !strings.Contains(stdout, "corrupt") {
-			t.Fatalf("stdout = %q, want it to contain 'corrupt'", stdout)
 		}
 	})
 }

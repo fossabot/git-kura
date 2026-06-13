@@ -6,7 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"text/tabwriter"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
@@ -20,22 +21,31 @@ Manage the current seal key for the active session.
 Subcommands:
   enter <key> [-- <command...>]  Start a child shell with GIT_KURA_SEAL_KEY=<key>
   current                        Print the current seal key (GIT_KURA_SEAL_KEY)
-  ls                             List all recorded seal sessions
+  ls [key]                       List sealed paths, optionally filtered by key
   release                        Remove stale seal sessions
   add <path> [path...]            Add paths to the seal store under the current key
   remove <path> [path...]         Remove paths from the seal store under the current key
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
-const sealLsHelp = `Usage: git kura seal ls
+const sealLsHelp = `Usage: git kura seal ls [key]
 
-List all recorded seal sessions for this repository.
+List sealed paths recorded in the seal store.
 
-Displays key, worktree path, parent PID, child PID, age, and status.
-Sessions whose PIDs are dead are shown as stale.
-Sessions exceeding the TTL but with live PIDs are shown as stale-candidate.
+Without arguments, lists every sealed path across all keys for the whole
+repository (the seal store shared by all worktrees). With a key argument,
+lists only the paths sealed by that key.
 
-TTL is configured via GIT_KURA_SESSION_TTL (e.g. "10m"). Default: 5m.`
+ls is a repository-wide inspection command: it does NOT read
+GIT_KURA_SEAL_KEY, so its output is the same inside and outside a sealed
+session. To inspect a single key, pass it explicitly.
+
+Output is one line per sealed path:
+
+  <key>	<path>
+
+Paths are repository-root relative with "/" separators. Lines are sorted
+by key, then by path. An empty store produces no output and exits 0.`
 
 const sealReleaseHelp = `Usage: git kura seal release
 
@@ -132,10 +142,11 @@ func runSeal(args []string) error {
 			fmt.Println(sealLsHelp)
 			return nil
 		}
-		if len(args) > 1 {
-			return fmt.Errorf("usage: git kura seal ls: unexpected argument %q", args[1])
+		key, err := parseSealLsArgs(args[1:])
+		if err != nil {
+			return err
 		}
-		return cmdSealLs()
+		return cmdSealLs(key)
 	case "release":
 		if hasHelpFlag(args[1:]) {
 			fmt.Println(sealReleaseHelp)
@@ -168,47 +179,66 @@ func runSeal(args []string) error {
 	}
 }
 
-func cmdSealLs() error {
+// parseSealLsArgs accepts at most one positional key argument. Options are
+// rejected: ls is intentionally option-free in v0 so that future flags such
+// as --format can be added without ambiguity.
+func parseSealLsArgs(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return "", fmt.Errorf("usage: git kura seal ls [key]: unknown option %q", args[0])
+	}
+	if len(args) > 1 {
+		return "", fmt.Errorf("usage: git kura seal ls [key]: unexpected argument %q", args[1])
+	}
+	if err := validateKey(args[0]); err != nil {
+		return "", err
+	}
+	return args[0], nil
+}
+
+// cmdSealLs lists sealed paths from the path seal store as "<key>\t<path>"
+// lines, sorted by key then path. An empty filterKey lists every key.
+// Per docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md,
+// ls never consults GIT_KURA_SEAL_KEY: inspection scope must not depend on
+// the caller's session. It also reads the store without acquiring
+// paths.lock, so a held lock never blocks listing.
+func cmdSealLs(filterKey string) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository")
 	}
-	sessDir, err := sealSessionDir(repoRoot)
+	storeFile, _, err := pathsSealStore(repoRoot)
 	if err != nil {
 		return err
 	}
-	records, err := readAllSealSessions(sessDir)
+	store, err := readSealStore(storeFile)
 	if err != nil {
 		return err
 	}
 
-	ttl := sessionTTL()
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "key\tworktree\tparent\tchild\tage\tstatus"); err != nil {
-		return err
-	}
-	for _, r := range records {
-		if r.Err != nil {
-			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				"(unknown)", r.Path, "-", "-", "-", r.Err.Error(),
-			); err != nil {
-				return err
-			}
+	paths := make([]string, 0, len(store.Paths))
+	for p, entry := range store.Paths {
+		if filterKey != "" && entry.Key != filterKey {
 			continue
 		}
-		age := time.Since(r.Session.StartedAt).Truncate(time.Second)
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\t%s\n",
-			r.Session.Key,
-			r.Session.WorktreePath,
-			r.Session.ParentPID,
-			r.Session.ChildPID,
-			formatAge(age),
-			sessionStatusStr(r.Session, ttl),
-		); err != nil {
-			return err
-		}
+		paths = append(paths, p)
 	}
-	return w.Flush()
+	sort.Slice(paths, func(i, j int) bool {
+		ki, kj := store.Paths[paths[i]].Key, store.Paths[paths[j]].Key
+		if ki != kj {
+			return ki < kj
+		}
+		return paths[i] < paths[j]
+	})
+
+	var b strings.Builder
+	for _, p := range paths {
+		fmt.Fprintf(&b, "%s\t%s\n", store.Paths[p].Key, p)
+	}
+	_, err = os.Stdout.WriteString(b.String())
+	return err
 }
 
 func cmdSealRelease() error {
