@@ -11,37 +11,41 @@ import (
 
 const sealHelp = `Usage: git kura seal <subcommand> [args]
 
-Manage sealed paths in the repository-wide seal store.
+Manage path claims in the repository-wide seal store.
+
+A claim records that the current task — identified by the git-kura managed
+worktree you are in — intends to edit a path. This lets conflicting edits
+across tasks/worktrees be detected before they reach a merge.
 
 Subcommands:
-  ls [key]                       List sealed paths, optionally filtered by key
-  add <path> [path...]            Add paths to the seal store under the current key
-  remove <path> [path...]         Remove paths from the seal store under the current key
+  ls [key]                       List claimed paths, optionally filtered by key
+  claim <path> [path...]         Claim paths for the current key
+  unclaim <path> [path...]       Release the current key's claim on paths
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
 const sealLsHelp = `Usage: git kura seal ls [key]
 
-List sealed paths recorded in the seal store.
+List claimed paths recorded in the seal store.
 
-Without arguments, lists every sealed path across all keys for the whole
+Without arguments, lists every claimed path across all keys for the whole
 repository (the seal store shared by all worktrees). With a key argument,
-lists only the paths sealed by that key.
+lists only the paths claimed by that key.
 
 ls is a repository-wide inspection command: it does not derive a current key
 from the worktree, so its output is the same regardless of where it is run.
 To inspect a single key, pass it explicitly.
 
-Output is one line per sealed path:
+Output is one line per claimed path:
 
   <key>	<path>
 
 Paths are repository-root relative with "/" separators. Lines are sorted
 by key, then by path. An empty store produces no output and exits 0.`
 
-const sealAddHelp = `Usage: git kura seal add <path> [path...]
+const sealClaimHelp = `Usage: git kura seal claim <path> [path...]
 
-Add one or more file paths to the seal store under the current key.
+Claim one or more file paths for the current key in the seal store.
 
 Paths are interpreted relative to the repository root, regardless of the
 current working directory. Absolute paths are rejected.
@@ -49,9 +53,9 @@ Exits with error if:
   - no current seal key is available (see "Current key" below)
   - any path is absolute or outside the repository
   - any path does not exist or is a directory
-  - any path is already sealed under a different key
+  - any path is already claimed by a different key
 
-If a path is already sealed under the current key, it is skipped (idempotent).
+If a path is already claimed by the current key, it is skipped (idempotent).
 
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
@@ -60,18 +64,18 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
-const sealRemoveHelp = `Usage: git kura seal remove <path> [path...]
+const sealUnclaimHelp = `Usage: git kura seal unclaim <path> [path...]
 
-Remove one or more file paths from the seal store under the current key.
+Release the current key's claim on one or more file paths in the seal store.
 
 Paths are interpreted relative to the repository root, regardless of the
 current working directory. Absolute paths are rejected.
 Exits with error if:
   - no current seal key is available (see "Current key" below)
   - any path is absolute or outside the repository
-  - any path is sealed under a different key
+  - any path is claimed by a different key
 
-Paths not currently in the seal store are skipped (idempotent).
+Paths not currently claimed are skipped (idempotent).
 
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
@@ -99,27 +103,35 @@ func runSeal(args []string) error {
 			return err
 		}
 		return cmdSealLs(key)
-	case "add":
-		if hasHelpFlag(args[1:]) {
-			fmt.Println(sealAddHelp)
-			return nil
-		}
-		if len(args) < 2 {
-			return fmt.Errorf("usage: git kura seal add <path> [path...]")
-		}
-		return cmdSealAdd(args[1:])
-	case "remove":
-		if hasHelpFlag(args[1:]) {
-			fmt.Println(sealRemoveHelp)
-			return nil
-		}
-		if len(args) < 2 {
-			return fmt.Errorf("usage: git kura seal remove <path> [path...]")
-		}
-		return cmdSealRemove(args[1:])
+	case "claim":
+		return runSealClaim(args[1:])
+	case "unclaim":
+		return runSealUnclaim(args[1:])
 	default:
 		return fmt.Errorf("unknown seal subcommand: %s", args[0])
 	}
+}
+
+func runSealClaim(args []string) error {
+	if hasHelpFlag(args) {
+		fmt.Println(sealClaimHelp)
+		return nil
+	}
+	if len(args) == 0 {
+		return fmt.Errorf("usage: git kura seal claim <path> [path...]")
+	}
+	return cmdSealClaim(args)
+}
+
+func runSealUnclaim(args []string) error {
+	if hasHelpFlag(args) {
+		fmt.Println(sealUnclaimHelp)
+		return nil
+	}
+	if len(args) == 0 {
+		return fmt.Errorf("usage: git kura seal unclaim <path> [path...]")
+	}
+	return cmdSealUnclaim(args)
 }
 
 // parseSealLsArgs accepts at most one positional key argument. Options are
@@ -141,7 +153,7 @@ func parseSealLsArgs(args []string) (string, error) {
 	return args[0], nil
 }
 
-// cmdSealLs lists sealed paths from the path seal store as "<key>\t<path>"
+// cmdSealLs lists claimed paths from the path seal store as "<key>\t<path>"
 // lines, sorted by key then path. An empty filterKey lists every key.
 // Per docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md,
 // ls is always repository-wide: its scope must not depend on the caller's

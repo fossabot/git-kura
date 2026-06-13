@@ -199,8 +199,8 @@ func readSealContext() (string, error) {
 	return worktree.CurrentKey(repoRoot)
 }
 
-// sealConflict records one path that could not be added/removed because it is
-// sealed by a key other than the current one.
+// sealConflict records one path that could not be claimed/unclaimed because it
+// is claimed by a key other than the current one.
 type sealConflict struct {
 	path     string // path as given by the user
 	sealedBy string // key that currently seals the path
@@ -211,13 +211,13 @@ type sealConflict struct {
 func sealConflictError(conflicts []sealConflict) error {
 	parts := make([]string, 0, len(conflicts))
 	for _, c := range conflicts {
-		parts = append(parts, fmt.Sprintf("path %q is already sealed by key %q", c.path, c.sealedBy))
+		parts = append(parts, fmt.Sprintf("path %q is already claimed by key %q", c.path, c.sealedBy))
 	}
 	return exitCodeError(exitSealConflict,
 		fmt.Errorf("seal-conflict: %s", strings.Join(parts, "; ")))
 }
 
-func cmdSealAdd(rawPaths []string) error {
+func cmdSealClaim(rawPaths []string) error {
 	key, err := readSealContext()
 	if err != nil {
 		return err
@@ -266,14 +266,14 @@ func cmdSealAdd(rawPaths []string) error {
 		// Only files can be sealed; directory seals are out of scope (see
 		// docs/adr/20260611T114624Z-limit-seal-targets-to-repository-relative-files.md).
 		if info.IsDir() {
-			return fmt.Errorf("path %q is a directory; only files can be sealed", rawPath)
+			return fmt.Errorf("path %q is a directory; only files can be claimed", rawPath)
 		}
 
 		if entry, sealed := store.Paths[storeKey]; sealed {
 			if entry.Key != key {
 				conflicts = append(conflicts, sealConflict{path: rawPath, sealedBy: entry.Key})
 			}
-			// Already sealed under the current key: idempotent, nothing to write.
+			// Already claimed under the current key: idempotent, nothing to write.
 			continue
 		}
 		toAdd = append(toAdd, storeKey)
@@ -291,7 +291,7 @@ func cmdSealAdd(rawPaths []string) error {
 	return writeSealStore(storeFile, store)
 }
 
-func cmdSealRemove(rawPaths []string) error {
+func cmdSealUnclaim(rawPaths []string) error {
 	key, err := readSealContext()
 	if err != nil {
 		return err
@@ -332,7 +332,7 @@ func cmdSealRemove(rawPaths []string) error {
 
 		entry, sealed := store.Paths[storeKey]
 		if !sealed {
-			// Removing a path that was never sealed: idempotent no-op.
+			// Unclaiming a path that was never claimed: idempotent no-op.
 			continue
 		}
 		if entry.Key != key {

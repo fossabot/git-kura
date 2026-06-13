@@ -19,7 +19,7 @@ working context is. See
 [`docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md`](../adr/20260612T170922Z_seal-command-current-context-and-scope.md)
 for the full rationale.
 
-> Of these, only `seal add`, `seal remove`, and `seal ls` are implemented in
+> Of these, only `seal claim`, `seal unclaim`, and `seal ls` are implemented in
 > the current release. `seal test`, `seal doctor`, and `seal session
 > ls`/`clean` describe the intended v0 design recorded in the ADR.
 
@@ -38,14 +38,14 @@ worktree, or that worktree's metadata is missing or inconsistent, they fail.
 
 | Command | Effect |
 |---------|--------|
-| `git kura seal add <file...>` | change path seal ownership (mutation) |
-| `git kura seal remove <file...>` | change path seal ownership (mutation) |
+| `git kura seal claim <file...>` | claim paths for the current key (mutation) |
+| `git kura seal unclaim <file...>` | release the current key's claim (mutation) |
 | `git kura seal test <file...>` | context-validation (read-only) |
 
 `seal test` is read-only, but it answers whether the given files may be handled
 in the *current* working context, so it is grouped with the mutation commands
 and requires a current key in v0. With a valid current key, unsealed files and
-files sealed by the current key are allowed, while files sealed by another key
+files claimed by the current key are allowed, while files claimed by another key
 are rejected. v0 does not provide a project-wide validation mode (no
 `--all` / `--unsealed`).
 
