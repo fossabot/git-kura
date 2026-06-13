@@ -193,6 +193,75 @@ empty output and exit 0. A store that cannot be parsed, has an unsupported
 `ls` is read-only and does not take the store lock, so it is never blocked
 by a held `paths.lock`.
 
+## `git kura seal session ls [key]`
+
+List the seal session records for this repository.
+
+```sh
+git kura seal session ls           # every recorded session
+git kura seal session ls issue-14  # only sessions recorded under issue-14
+```
+
+A seal session is created by `git kura seal enter <key>` and normally removed
+when the child shell exits. A record can survive an abnormal exit (terminal
+crash, killed process, OS shutdown), and `session ls` is how you inspect what
+remains.
+
+Output is a table with one row per session:
+
+```txt
+key  worktree  parent  child  age  status
+```
+
+`status` is one of:
+
+| Status | Meaning |
+|--------|---------|
+| `active` | parent and child PIDs are alive and within the TTL |
+| `stale-candidate (ttl exceeded)` | PIDs are alive but the session is older than the TTL — review it, but it is not removed automatically |
+| `stale` | parent and/or child PID is dead — safe to clean |
+| `unknown` | PIDs are alive but the child PID was never recorded |
+
+The TTL is a warning signal only; it never causes a session to be removed.
+The default is 5 minutes and it is configured with the `GIT_KURA_SESSION_TTL`
+environment variable, which accepts a Go duration string (for example `10m`).
+
+Like `seal ls`, `session ls` is a repository-wide inspection command. It does
+**not** read `GIT_KURA_SEAL_KEY`, so its output is the same inside and outside
+a `seal enter` session. Pass a key argument (validated with the same rules as
+`seal enter`) to narrow the listing to one key. The inspected scope is the
+session store in the Git common dir, shared by all worktrees of the
+repository. Corrupt or unreadable session files are always listed (with the
+problem in the `status` column) because they block `seal enter` for their
+worktree. See
+[`docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md`](adr/20260612T170922Z_seal-command-current-context-and-scope.md)
+for the rationale.
+
+## `git kura seal session clean [--apply]`
+
+Remove stale seal sessions from this repository.
+
+```sh
+git kura seal session clean          # dry-run: show what would be removed
+git kura seal session clean --apply  # actually remove the stale sessions
+```
+
+A session is treated as stale **only** when its parent and child PIDs are
+confirmed dead (best-effort PID liveness check). TTL expiry alone is never a
+reason to delete: a TTL-exceeded session whose PIDs are still alive is kept.
+Sessions whose liveness cannot be determined are left in place — when in
+doubt, `clean` does nothing.
+
+`session clean` is **dry-run by default**: it prints the sessions it would
+remove and exits without changing anything. Pass `--apply` to delete them.
+This is a maintenance command and does not read `GIT_KURA_SEAL_KEY`; it
+operates on the repository-wide session store resolved from the Git common
+dir. Before deleting, it re-reads each record and re-checks liveness, so a
+session that was restarted between listing and deletion is not removed.
+
+Corrupt or unreadable session files are reported as a warning and never
+deleted automatically — inspect them manually.
+
 ## Exit codes
 
 Kura uses stable exit codes so scripts and AI-agent workflows can react

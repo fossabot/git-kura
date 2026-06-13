@@ -30,7 +30,9 @@ func TestRunHelpAndUsage(t *testing.T) {
 		{name: "seal enter help", args: []string{"seal", "enter", "--help"}, want: "Usage: git kura seal enter"},
 		{name: "seal current help", args: []string{"seal", "current", "--help"}, want: "Usage: git kura seal current"},
 		{name: "seal ls help", args: []string{"seal", "ls", "--help"}, want: "Usage: git kura seal ls"},
-		{name: "seal release help", args: []string{"seal", "release", "--help"}, want: "Usage: git kura seal release"},
+		{name: "seal session help", args: []string{"seal", "session", "--help"}, want: "Usage: git kura seal session"},
+		{name: "seal session ls help", args: []string{"seal", "session", "ls", "--help"}, want: "Usage: git kura seal session ls"},
+		{name: "seal session clean help", args: []string{"seal", "session", "clean", "--help"}, want: "Usage: git kura seal session clean"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := captureStdout(t, func() error {
@@ -85,7 +87,10 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"seal", "ls", "--all"},
 		{"seal", "ls", "--key", "key1"},
 		{"seal", "ls", "..invalid"},
-		{"seal", "release", "extra"},
+		{"seal", "session"},
+		{"seal", "session", "ls", "key1", "key2"},
+		{"seal", "session", "ls", "--all"},
+		{"seal", "session", "clean", "extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := run(args); err == nil {
@@ -663,7 +668,7 @@ func TestCmdSealLsDoesNotBlockOnLock(t *testing.T) {
 	})
 }
 
-func TestCmdSealReleaseNoStale(t *testing.T) {
+func TestCmdSealSessionCleanNoStale(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -683,10 +688,10 @@ func TestCmdSealReleaseNoStale(t *testing.T) {
 		})
 
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "release"})
+			return run([]string{"seal", "session", "clean", "--apply"})
 		})
 		if err != nil {
-			t.Fatalf("seal release error = %v, want nil", err)
+			t.Fatalf("seal session clean error = %v, want nil", err)
 		}
 		if !strings.Contains(strings.ToLower(stdout), "no stale") {
 			t.Fatalf("stdout = %q, want 'no stale' message", stdout)
@@ -699,7 +704,7 @@ func TestCmdSealReleaseNoStale(t *testing.T) {
 	})
 }
 
-func TestCmdSealReleaseWithStale(t *testing.T) {
+func TestCmdSealSessionCleanApplyRemovesStale(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -721,10 +726,10 @@ func TestCmdSealReleaseWithStale(t *testing.T) {
 		stalePath := sealSessionPath(sessDir, "/wt-stale")
 
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "release"})
+			return run([]string{"seal", "session", "clean", "--apply"})
 		})
 		if err != nil {
-			t.Fatalf("seal release error = %v, want nil", err)
+			t.Fatalf("seal session clean error = %v, want nil", err)
 		}
 		if !strings.Contains(stdout, "stale-key") {
 			t.Fatalf("stdout = %q, want it to mention stale-key", stdout)
@@ -735,7 +740,9 @@ func TestCmdSealReleaseWithStale(t *testing.T) {
 	})
 }
 
-func TestCmdSealReleaseKeepsTTLOnlyStale(t *testing.T) {
+// session clean without --apply is dry-run: it reports the stale session but
+// must not delete anything.
+func TestCmdSealSessionCleanDryRunKeepsStale(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PID liveness uses kill(0) which is Unix-specific")
 	}
@@ -749,7 +756,50 @@ func TestCmdSealReleaseKeepsTTLOnlyStale(t *testing.T) {
 			t.Fatalf("sealSessionDir: %v", err)
 		}
 
-		// TTL-exceeded but alive PIDs → must NOT be deleted
+		dead := deadPIDForTest(t)
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "stale-key", WorktreePath: "/wt-stale",
+			ParentPID: dead, StartedAt: time.Now(),
+		})
+		stalePath := sealSessionPath(sessDir, "/wt-stale")
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "clean"})
+		})
+		if err != nil {
+			t.Fatalf("seal session clean error = %v, want nil", err)
+		}
+		if !strings.Contains(strings.ToLower(stdout), "dry-run") {
+			t.Fatalf("stdout = %q, want it to announce dry-run", stdout)
+		}
+		if !strings.Contains(stdout, "--apply") {
+			t.Fatalf("stdout = %q, want it to mention --apply", stdout)
+		}
+		if !strings.Contains(stdout, "stale-key") {
+			t.Fatalf("stdout = %q, want it to mention stale-key", stdout)
+		}
+		// Dry-run must NOT delete the stale session.
+		if _, statErr := os.Stat(stalePath); statErr != nil {
+			t.Fatalf("dry-run unexpectedly deleted the stale session: %v", statErr)
+		}
+	})
+}
+
+func TestCmdSealSessionCleanKeepsTTLOnlyStale(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+
+		// TTL-exceeded but alive PIDs → must NOT be deleted, even with --apply
 		writeSealSessionFile(t, sessDir, sealSession{
 			Key: "ttl-key", WorktreePath: "/wt-ttl",
 			ParentPID: os.Getpid(), ChildPID: os.Getpid(),
@@ -758,9 +808,9 @@ func TestCmdSealReleaseKeepsTTLOnlyStale(t *testing.T) {
 		ttlPath := sealSessionPath(sessDir, "/wt-ttl")
 
 		if _, err := captureStdout(t, func() error {
-			return run([]string{"seal", "release"})
+			return run([]string{"seal", "session", "clean", "--apply"})
 		}); err != nil {
-			t.Fatalf("seal release error = %v, want nil", err)
+			t.Fatalf("seal session clean error = %v, want nil", err)
 		}
 
 		if _, statErr := os.Stat(ttlPath); statErr != nil {
@@ -769,7 +819,7 @@ func TestCmdSealReleaseKeepsTTLOnlyStale(t *testing.T) {
 	})
 }
 
-func TestCmdSealReleaseWarnsAboutCorrupt(t *testing.T) {
+func TestCmdSealSessionCleanWarnsAboutCorrupt(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
@@ -788,10 +838,10 @@ func TestCmdSealReleaseWarnsAboutCorrupt(t *testing.T) {
 		t.Cleanup(func() { os.Remove(corruptPath) }) //nolint:errcheck
 
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "release"})
+			return run([]string{"seal", "session", "clean", "--apply"})
 		})
 		if err != nil {
-			t.Fatalf("seal release error = %v, want nil", err)
+			t.Fatalf("seal session clean error = %v, want nil", err)
 		}
 		// corrupt file must be warned about but NOT deleted
 		if !strings.Contains(strings.ToLower(stdout), "corrupt") {
@@ -803,12 +853,116 @@ func TestCmdSealReleaseWarnsAboutCorrupt(t *testing.T) {
 	})
 }
 
-func TestCmdSealLsAndReleaseOutsideRepo(t *testing.T) {
+func TestCmdSealSessionLs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "active-key", WorktreePath: "/wt-active",
+			ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: time.Now(),
+		})
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "stale-key", WorktreePath: "/wt-stale",
+			ParentPID: deadPIDForTest(t), StartedAt: time.Now(),
+		})
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "ls"})
+		})
+		if err != nil {
+			t.Fatalf("seal session ls error = %v, want nil", err)
+		}
+		for _, want := range []string{"key", "worktree", "status", "active-key", "/wt-active", "stale-key", "/wt-stale", sessionStatusActive, sessionStatusStale} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("stdout = %q, want it to contain %q", stdout, want)
+			}
+		}
+	})
+}
+
+// session ls with a key argument lists only that key's sessions; other keys are
+// hidden. The header is always printed.
+func TestCmdSealSessionLsFilterByKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PID liveness uses kill(0) which is Unix-specific")
+	}
+
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	withWorkingDir(t, repo, func() {
+		sessDir, err := sealSessionDir(repo)
+		if err != nil {
+			t.Fatalf("sealSessionDir: %v", err)
+		}
+
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "keep-key", WorktreePath: "/wt-keep",
+			ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: time.Now(),
+		})
+		writeSealSessionFile(t, sessDir, sealSession{
+			Key: "other-key", WorktreePath: "/wt-other",
+			ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: time.Now(),
+		})
+
+		stdout, err := captureStdout(t, func() error {
+			return run([]string{"seal", "session", "ls", "keep-key"})
+		})
+		if err != nil {
+			t.Fatalf("seal session ls keep-key error = %v, want nil", err)
+		}
+		if !strings.Contains(stdout, "keep-key") {
+			t.Fatalf("stdout = %q, want it to contain keep-key", stdout)
+		}
+		if strings.Contains(stdout, "other-key") {
+			t.Fatalf("stdout = %q, want it NOT to contain other-key", stdout)
+		}
+	})
+}
+
+func TestCmdSealSessionLsRejectsBadKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	withWorkingDir(t, repo, func() {
+		if err := run([]string{"seal", "session", "ls", "bad/key"}); err == nil {
+			t.Fatal("seal session ls bad/key error = nil, want error")
+		}
+	})
+}
+
+func TestCmdSealSessionCleanRejectsUnknownFlag(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	withWorkingDir(t, repo, func() {
+		if err := run([]string{"seal", "session", "clean", "--force"}); err == nil {
+			t.Fatal("seal session clean --force error = nil, want error")
+		}
+	})
+}
+
+func TestCmdSealSessionUnknownSubcommand(t *testing.T) {
+	if err := run([]string{"seal", "session", "bogus"}); err == nil {
+		t.Fatal("seal session bogus error = nil, want error")
+	}
+}
+
+func TestCmdSealSessionOutsideRepo(t *testing.T) {
 	outside := t.TempDir()
 	withWorkingDir(t, outside, func() {
 		for _, args := range [][]string{
 			{"seal", "ls"},
-			{"seal", "release"},
+			{"seal", "session", "ls"},
+			{"seal", "session", "clean"},
 		} {
 			t.Run(strings.Join(args, " "), func(t *testing.T) {
 				if err := run(args); err == nil {
