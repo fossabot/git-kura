@@ -192,7 +192,7 @@ func normalizeSealPath(repoRoot, rawPath string) (string, error) {
 func readSealContext() (string, error) {
 	key := os.Getenv("GIT_KURA_SEAL_KEY")
 	if key == "" {
-		return "", fmt.Errorf("not in sealed session (GIT_KURA_SEAL_KEY not set), run 'git kura seal enter <key>' to start one")
+		return "", fmt.Errorf("no current seal key (GIT_KURA_SEAL_KEY not set)")
 	}
 	if err := validateKey(key); err != nil {
 		return "", fmt.Errorf("GIT_KURA_SEAL_KEY is invalid: %w", err)

@@ -1,7 +1,20 @@
 # Seal Command Current Context and Scope
 
-- Status: Accepted
+- Status: Partially superseded
 - Created: 2026-06-12T17:09:22Z
+- Amended: 2026-06-13
+
+> **Partially superseded.** The read-only-vs-mutation classification this ADR
+> establishes still holds: `seal ls` is repository-wide and ignores the current
+> key, while `seal add` / `seal remove` require a current seal key. However, the
+> mechanism described here for *establishing* that key — `git kura seal enter <key>`
+> setting `GIT_KURA_SEAL_KEY` for a child shell — has been withdrawn, along with the
+> `seal session ls` / `seal session clean` inspection and maintenance commands, in
+> [#29](https://github.com/tooppoo/git-kura/issues/29). The current key is now intended
+> to be derived from the active git-kura managed worktree; `GIT_KURA_SEAL_KEY` survives
+> only as an internal compatibility shim until [#32](https://github.com/tooppoo/git-kura/issues/32)
+> replaces the current-key resolution. Treat the `seal enter` / `seal session ...`
+> references below as historical context, not current design.
 
 ## Context
 

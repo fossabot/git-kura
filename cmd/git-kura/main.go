@@ -50,7 +50,7 @@ Commands:
   open  <key> [flags]  Create a worktree for <key>
   close <key>          Remove the worktree for <key>
   ls                   List all open worktrees
-  seal  <subcommand>   Manage seal keys for the current session
+  seal  <subcommand>   Manage sealed paths in the repository-wide seal store
 
 Run "git kura <command> --help" for command-specific help.`
 
