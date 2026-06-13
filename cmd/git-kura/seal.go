@@ -21,6 +21,7 @@ Subcommands:
   ls [key]                       List claimed paths, optionally filtered by key
   claim <path> [path...]         Claim paths for the current key
   unclaim <path> [path...]       Release the current key's claim on paths
+  test <path> [path...]          Check paths against the current seal context
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
@@ -84,6 +85,34 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
+const sealTestHelp = `Usage: git kura seal test <path> [path...]
+
+Check whether one or more paths may be handled in the current seal context.
+
+seal test is read-only: it never modifies the seal store and never takes the
+store lock. It answers a single question — given the current key, is every
+listed path safe to edit?
+
+Paths are interpreted relative to the repository root, regardless of the
+current working directory. Absolute paths and paths outside the repository are
+rejected. A path inside the repository that does not exist yet is treated as
+unclaimed, so seal test can be used to check a file before creating it.
+
+A path is safe when it is unclaimed, or already claimed by the current key. A
+path claimed by a different key is a conflict. seal test exits 0 only when every
+path is safe; if any path conflicts it exits with seal-conflict (code 6) and
+reports each conflicting path and the key that claims it.
+
+This command takes no options in v0: --all, --unsealed, and --staged are not
+defined and are rejected.
+
+Current key:
+  The current key is derived from the git-kura managed worktree you are in:
+  run this command from inside the worktree created by "git kura open <key>"
+  and that worktree's key becomes the current key. It fails when the current
+  directory is not inside a managed worktree, or when that worktree's
+  metadata is missing or inconsistent.`
+
 func runSeal(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: git kura seal <subcommand> [args]")
@@ -107,6 +136,8 @@ func runSeal(args []string) error {
 		return runSealClaim(args[1:])
 	case "unclaim":
 		return runSealUnclaim(args[1:])
+	case "test":
+		return runSealTest(args[1:])
 	default:
 		return fmt.Errorf("unknown seal subcommand: %s", args[0])
 	}
@@ -132,6 +163,34 @@ func runSealUnclaim(args []string) error {
 		return fmt.Errorf("usage: git kura seal unclaim <path> [path...]")
 	}
 	return cmdSealUnclaim(args)
+}
+
+func runSealTest(args []string) error {
+	if hasHelpFlag(args) {
+		fmt.Println(sealTestHelp)
+		return nil
+	}
+	paths, err := parseSealTestArgs(args)
+	if err != nil {
+		return err
+	}
+	return cmdSealTest(paths)
+}
+
+// parseSealTestArgs requires at least one positional path and rejects any
+// option. seal test is intentionally option-free in v0: the not-yet-defined
+// --all / --unsealed / --staged modes must error rather than be silently
+// ignored, so a future release can add them without changing behavior.
+func parseSealTestArgs(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("usage: git kura seal test <path> [path...]")
+	}
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			return nil, fmt.Errorf("usage: git kura seal test <path> [path...]: unknown option %q", a)
+		}
+	}
+	return args, nil
 }
 
 // parseSealLsArgs accepts at most one positional key argument. Options are

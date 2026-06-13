@@ -19,9 +19,9 @@ working context is. See
 [`docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md`](../adr/20260612T170922Z_seal-command-current-context-and-scope.md)
 for the full rationale.
 
-> Of these, only `seal claim`, `seal unclaim`, and `seal ls` are implemented in
-> the current release. `seal test`, `seal doctor`, and `seal session
-> ls`/`clean` describe the intended v0 design recorded in the ADR.
+> Of these, `seal claim`, `seal unclaim`, `seal test`, and `seal ls` are
+> implemented in the current release. `seal doctor` and `seal session ls`/`clean`
+> describe the intended v0 design recorded in the ADR.
 
 ## Project scope
 
