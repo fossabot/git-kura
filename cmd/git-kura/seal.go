@@ -200,9 +200,10 @@ func parseSealLsArgs(args []string) (string, error) {
 
 // cmdSealLs lists sealed paths from the path seal store as "<key>\t<path>"
 // lines, sorted by key then path. An empty filterKey lists every key.
-// Per ADR 20260612T170922Z, ls never consults GIT_KURA_SEAL_KEY: inspection
-// scope must not depend on the caller's session. It also reads the store
-// without acquiring paths.lock, so a held lock never blocks listing.
+// Per docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md,
+// ls never consults GIT_KURA_SEAL_KEY: inspection scope must not depend on
+// the caller's session. It also reads the store without acquiring
+// paths.lock, so a held lock never blocks listing.
 func cmdSealLs(filterKey string) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {

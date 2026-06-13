@@ -178,8 +178,9 @@ git kura seal ls issue-18 # only paths sealed by issue-18
 `seal remove`, it does **not** read `GIT_KURA_SEAL_KEY`: running it inside a
 `seal enter` session shows the same repository-wide result as running it
 outside. To inspect a single key, pass the key as an explicit argument
-(validated with the same rules as `seal enter`). See the ADR
-"Seal Command Current Context and Scope" for the rationale.
+(validated with the same rules as `seal enter`). See
+[`docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md`](adr/20260612T170922Z_seal-command-current-context-and-scope.md)
+for the rationale.
 
 The listed scope is the seal store in the Git common dir, shared by all
 worktrees of the repository. Paths are repository-root relative with `/`
