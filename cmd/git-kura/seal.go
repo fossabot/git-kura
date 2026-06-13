@@ -54,11 +54,14 @@ Exits with error if:
 If a path is already sealed under the current key, it is skipped (idempotent).
 
 Current key:
-  The current key is currently read from the GIT_KURA_SEAL_KEY environment
-  variable. This is a temporary, internal compatibility mechanism, not the
-  intended workflow: deriving the key from the active git-kura managed
-  worktree is tracked in issue #32. Until then, set GIT_KURA_SEAL_KEY
-  yourself, e.g. GIT_KURA_SEAL_KEY=issue-18 git kura seal add <path>.`
+  The current key is derived from the git-kura managed worktree you are in:
+  run this command from inside the worktree created by "git kura open <key>"
+  and that worktree's key becomes the current key. No environment variable is
+  needed. It fails when the current directory is not inside a managed worktree
+  or when its metadata is missing or inconsistent.
+
+  As a transitional compatibility guard, if GIT_KURA_SEAL_KEY is set it must
+  match the worktree-derived key; a mismatch fails.`
 
 const sealRemoveHelp = `Usage: git kura seal remove <path> [path...]
 
@@ -74,11 +77,14 @@ Exits with error if:
 Paths not currently in the seal store are skipped (idempotent).
 
 Current key:
-  The current key is currently read from the GIT_KURA_SEAL_KEY environment
-  variable. This is a temporary, internal compatibility mechanism, not the
-  intended workflow: deriving the key from the active git-kura managed
-  worktree is tracked in issue #32. Until then, set GIT_KURA_SEAL_KEY
-  yourself, e.g. GIT_KURA_SEAL_KEY=issue-18 git kura seal remove <path>.`
+  The current key is derived from the git-kura managed worktree you are in:
+  run this command from inside the worktree created by "git kura open <key>"
+  and that worktree's key becomes the current key. No environment variable is
+  needed. It fails when the current directory is not inside a managed worktree
+  or when its metadata is missing or inconsistent.
+
+  As a transitional compatibility guard, if GIT_KURA_SEAL_KEY is set it must
+  match the worktree-derived key; a mismatch fails.`
 
 func runSeal(args []string) error {
 	if len(args) == 0 {

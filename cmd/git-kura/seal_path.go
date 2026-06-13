@@ -13,6 +13,7 @@ import (
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
+	"github.com/tooppoo/git-kura/internal/worktree"
 )
 
 const sealPathSchemaVersion = 1
@@ -189,13 +190,27 @@ func normalizeSealPath(repoRoot, rawPath string) (string, error) {
 	return rel, nil
 }
 
+// readSealContext resolves the current seal key from the active git-kura
+// managed worktree. The key is derived from the worktree the caller is in, not
+// from process-local state, so it survives across the fresh shell invocations
+// that agent workflows make (see issue #32 and
+// docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md).
+//
+// GIT_KURA_SEAL_KEY is no longer the source of truth. As a transitional
+// compatibility guard, if it is set it must match the worktree-derived key;
+// a mismatch fails so a stale environment can never silently seal under the
+// wrong key.
 func readSealContext() (string, error) {
-	key := os.Getenv("GIT_KURA_SEAL_KEY")
-	if key == "" {
-		return "", fmt.Errorf("no current seal key (GIT_KURA_SEAL_KEY not set)")
+	repoRoot, err := gitutil.RepoRoot()
+	if err != nil {
+		return "", fmt.Errorf("not inside a git repository")
 	}
-	if err := validateKey(key); err != nil {
-		return "", fmt.Errorf("GIT_KURA_SEAL_KEY is invalid: %w", err)
+	key, err := worktree.CurrentKey(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	if env := os.Getenv("GIT_KURA_SEAL_KEY"); env != "" && env != key {
+		return "", fmt.Errorf("GIT_KURA_SEAL_KEY=%q does not match the current worktree key %q; unset it or move to the matching worktree", env, key)
 	}
 	return key, nil
 }

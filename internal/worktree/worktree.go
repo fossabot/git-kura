@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
 )
@@ -65,6 +66,63 @@ func ReadMetadata(repoRoot, key string) (MetadataFile, error) {
 		return MetadataFile{}, err
 	}
 	return meta, nil
+}
+
+// CurrentKey derives the managed-worktree key from the current git worktree.
+//
+// currentTop is the top-level directory of the current git worktree, i.e. the
+// output of "git rev-parse --show-toplevel". A git-kura managed worktree always
+// lives at "<git-common-dir>/kura/worktrees/<key>", so the key is the single
+// path component below that directory.
+//
+// It fails safely when:
+//   - the current directory is not inside a git-kura managed worktree;
+//   - the worktree's metadata is missing or invalid;
+//   - the metadata records a worktree path that does not match currentTop
+//     (an inconsistent or relocated worktree).
+func CurrentKey(currentTop string) (string, error) {
+	commonDir, err := gitutil.CommonDir(currentTop)
+	if err != nil {
+		return "", fmt.Errorf("resolve git common dir: %w", err)
+	}
+	stateDir := filepath.Join(commonDir, "kura")
+	worktreesDir := filepath.Join(stateDir, "worktrees")
+
+	rel, err := filepath.Rel(worktreesDir, currentTop)
+	if err != nil || rel == "." || rel == ".." ||
+		strings.HasPrefix(rel, ".."+string(filepath.Separator)) ||
+		strings.ContainsRune(rel, filepath.Separator) {
+		return "", fmt.Errorf("current directory is not inside a git-kura managed worktree (expected a worktree under %s)", worktreesDir)
+	}
+	key := rel
+
+	metaPath := MetadataPathInStateDir(stateDir, key)
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("worktree at %s has no git-kura metadata; it is not a managed worktree", currentTop)
+		}
+		return "", fmt.Errorf("read metadata for key %q: %w", key, err)
+	}
+	var meta MetadataFile
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return "", fmt.Errorf("metadata for key %q is invalid: %w", key, err)
+	}
+	if !samePath(meta.WorktreePath, currentTop) {
+		return "", fmt.Errorf("metadata for key %q records worktree %s, but the current worktree is %s", key, meta.WorktreePath, currentTop)
+	}
+	return key, nil
+}
+
+// samePath reports whether a and b refer to the same filesystem location,
+// tolerating symlinked path prefixes (e.g. /tmp vs /private/tmp).
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }
 
 func ReadStructuredMetadata(repoRoot, key, worktreePath string, worktreeExists bool) (MetadataFile, error) {

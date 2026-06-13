@@ -5,10 +5,16 @@ are classified and why. For the command reference (usage, arguments, examples),
 see the seal sections in [commands.md](../commands.md).
 
 `git kura seal` uses a *seal key* to represent the working context of a process
-or agent. `git kura seal enter <key>` establishes the current seal key by
-setting `GIT_KURA_SEAL_KEY` for a child shell and its descendants, so the
-current key is process-local and session-local rather than a repository-wide
-persistent setting.
+or agent. The current seal key is derived from the git-kura managed worktree the
+command runs in: each worktree is created by `git kura open <key>`, so the key
+of the worktree you are in is the current key. This makes the context survive
+the fresh shell invocations that agent workflows make, without relying on
+process-local state. See
+[`docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md`](../adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md).
+
+`GIT_KURA_SEAL_KEY` is no longer the source of truth. As a transitional
+compatibility guard, if it is set it must match the worktree-derived key; a
+mismatch fails.
 
 Seal commands are classified by their effect and by whether their meaning
 depends on the current seal key. This asymmetry is an intentional design
@@ -31,8 +37,8 @@ on this project scope by default.
 ## Current-dependent commands
 
 These commands are semantically tied to the active work context and require a
-valid current seal key. If `GIT_KURA_SEAL_KEY` is unset, empty, or invalid,
-they fail.
+valid current seal key. If the command is not run inside a git-kura managed
+worktree, or that worktree's metadata is missing or inconsistent, they fail.
 
 | Command | Effect |
 |---------|--------|
@@ -49,10 +55,11 @@ are rejected. v0 does not provide a project-wide validation mode (no
 
 ## Current-independent inspection commands
 
-These commands inspect the project scope by default and must **not** consult
-`GIT_KURA_SEAL_KEY`. Running them inside a `seal enter <key>` session produces
-the same project-wide result as running them outside. A narrower key scope must
-be requested explicitly (for example `git kura seal ls <key>`).
+These commands inspect the project scope by default and must **not** derive a
+current key from the worktree. Running them from inside a managed worktree
+produces the same project-wide result as running them from the main checkout. A
+narrower key scope must be requested explicitly (for example
+`git kura seal ls <key>`).
 
 | Command | Notes |
 |---------|-------|

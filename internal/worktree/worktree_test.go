@@ -156,6 +156,82 @@ func TestPathHelpersReturnErrorsOutsideRepository(t *testing.T) {
 	}
 }
 
+func TestCurrentKey(t *testing.T) {
+	repo := initRepoWithCommit(t)
+	key := "51"
+	wtTop := addManagedWorktree(t, repo, key)
+
+	t.Run("inside managed worktree", func(t *testing.T) {
+		got, err := worktree.CurrentKey(wtTop)
+		if err != nil {
+			t.Fatalf("CurrentKey error = %v", err)
+		}
+		if got != key {
+			t.Fatalf("CurrentKey = %q, want %q", got, key)
+		}
+	})
+
+	t.Run("from a subdirectory of the worktree", func(t *testing.T) {
+		sub := filepath.Join(wtTop, "sub")
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// CommonDir resolves from any directory inside the worktree, but the key
+		// is derived from the worktree top-level, so callers must pass the
+		// top-level. Passing the top-level resolved from the subdirectory still
+		// yields the same key.
+		top := revParseShowToplevel(t, sub)
+		got, err := worktree.CurrentKey(top)
+		if err != nil {
+			t.Fatalf("CurrentKey error = %v", err)
+		}
+		if got != key {
+			t.Fatalf("CurrentKey = %q, want %q", got, key)
+		}
+	})
+
+	t.Run("outside any managed worktree", func(t *testing.T) {
+		if _, err := worktree.CurrentKey(repo); err == nil {
+			t.Fatal("CurrentKey in main checkout error = nil, want error")
+		}
+	})
+}
+
+func TestCurrentKeyMissingMetadata(t *testing.T) {
+	repo := initRepoWithCommit(t)
+	wtTop := addManagedWorktree(t, repo, "51")
+
+	metaPath := filepath.Join(repo, ".git", "kura", "meta", "worktrees", "51.json")
+	if err := os.Remove(metaPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.CurrentKey(wtTop); err == nil {
+		t.Fatal("CurrentKey with missing metadata error = nil, want error")
+	}
+}
+
+func TestCurrentKeyInconsistentMetadata(t *testing.T) {
+	repo := initRepoWithCommit(t)
+	wtTop := addManagedWorktree(t, repo, "51")
+
+	metaPath := filepath.Join(repo, ".git", "kura", "meta", "worktrees", "51.json")
+	writeFile(t, metaPath, `{"repositoryRoot":"`+repo+`","baseBranch":"main","worktreePath":"/somewhere/else"}`)
+	if _, err := worktree.CurrentKey(wtTop); err == nil {
+		t.Fatal("CurrentKey with inconsistent metadata error = nil, want error")
+	}
+}
+
+func TestCurrentKeyInvalidMetadata(t *testing.T) {
+	repo := initRepoWithCommit(t)
+	wtTop := addManagedWorktree(t, repo, "51")
+
+	metaPath := filepath.Join(repo, ".git", "kura", "meta", "worktrees", "51.json")
+	writeFile(t, metaPath, `{`)
+	if _, err := worktree.CurrentKey(wtTop); err == nil {
+		t.Fatal("CurrentKey with invalid metadata error = nil, want error")
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 
@@ -165,6 +241,53 @@ func initRepo(t *testing.T) string {
 	}
 	gitCmd(t, repo, "init", "-b", "main")
 	return repo
+}
+
+func initRepoWithCommit(t *testing.T) string {
+	t.Helper()
+	repo := initRepo(t)
+	gitCmd(t, repo, "config", "user.email", "kura-test@example.com")
+	gitCmd(t, repo, "config", "user.name", "Kura Test")
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "initial\n")
+	gitCmd(t, repo, "add", "tracked.txt")
+	gitCmd(t, repo, "commit", "-m", "initial")
+	return repo
+}
+
+// addManagedWorktree creates a managed worktree for key and writes its
+// metadata the way "git kura open" does, returning the worktree's top-level.
+func addManagedWorktree(t *testing.T, repo, key string) string {
+	t.Helper()
+	wtPath, err := worktree.Path(repo, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, repo, "worktree", "add", wtPath, "-b", key, "HEAD")
+
+	top := revParseShowToplevel(t, wtPath)
+	metaPath, err := worktree.MetadataPath(repo, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, metaPath, `{"repositoryRoot":"`+repo+`","baseBranch":"main","worktreePath":"`+top+`"}`)
+	return top
+}
+
+func revParseShowToplevel(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel in %s: %v", dir, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func writeFile(t *testing.T, path, content string) {

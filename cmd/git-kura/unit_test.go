@@ -794,31 +794,68 @@ func TestSealLockReleaseReportsRemoveFailure(t *testing.T) {
 	}
 }
 
-func TestReadSealContextEmptyKey(t *testing.T) {
-	t.Setenv("GIT_KURA_SEAL_KEY", "")
-	_, err := readSealContext()
-	if err == nil {
-		t.Fatal("expected error for empty key, got nil")
-	}
+func TestReadSealContextInsideWorktree(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "")
+		key, err := readSealContext()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if key != "key1" {
+			t.Fatalf("got %q, want %q", key, "key1")
+		}
+	})
 }
 
-func TestReadSealContextInvalidKey(t *testing.T) {
-	t.Setenv("GIT_KURA_SEAL_KEY", "../../../clobber")
-	_, err := readSealContext()
-	if err == nil {
-		t.Fatal("expected error for invalid key, got nil")
-	}
+func TestReadSealContextOutsideWorktree(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// The main checkout is a git repository but not a managed worktree.
+	withWorkingDir(t, repo, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "")
+		if _, err := readSealContext(); err == nil {
+			t.Fatal("expected error outside a managed worktree, got nil")
+		}
+	})
 }
 
-func TestReadSealContextValidKey(t *testing.T) {
-	t.Setenv("GIT_KURA_SEAL_KEY", "key1")
-	key, err := readSealContext()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if key != "key1" {
-		t.Fatalf("got %q, want %q", key, "key1")
-	}
+func TestReadSealContextEnvMatchTolerated(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		key, err := readSealContext()
+		if err != nil {
+			t.Fatalf("matching GIT_KURA_SEAL_KEY should be tolerated: %v", err)
+		}
+		if key != "key1" {
+			t.Fatalf("got %q, want %q", key, "key1")
+		}
+	})
+}
+
+func TestReadSealContextEnvMismatchFails(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "other")
+		_, err := readSealContext()
+		if err == nil {
+			t.Fatal("expected error when GIT_KURA_SEAL_KEY mismatches worktree key, got nil")
+		}
+		if !strings.Contains(err.Error(), "does not match") {
+			t.Fatalf("error = %q, want it to mention the mismatch", err.Error())
+		}
+	})
 }
 
 // --- cmdSealAdd / cmdSealRemove in-process tests (need a real git repo) ---
@@ -826,10 +863,9 @@ func TestReadSealContextValidKey(t *testing.T) {
 func TestCmdSealAddAndRemoveInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
-
+	withWorkingDir(t, wt, func() {
 		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd: %v", err)
 		}
@@ -850,16 +886,18 @@ func TestCmdSealAddAndRemoveInProcess(t *testing.T) {
 func TestCmdSealAddMultiplePathsInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
-	writeFile(t, filepath.Join(repo, "third.txt"), "content\n")
+	commitFile(t, repo, "second.txt", "content\n")
+	commitFile(t, repo, "third.txt", "content\n")
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt1, func() {
 		if err := cmdSealAdd([]string{"tracked.txt", "second.txt", "third.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd multiple paths: %v", err)
 		}
-		// All three should be blocked for a different key
-		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+	})
+	// All three should be blocked for a different key
+	withWorkingDir(t, wt2, func() {
 		if err := cmdSealAdd([]string{"second.txt"}); err == nil {
 			t.Fatal("expected conflict for second.txt, got nil")
 		}
@@ -869,14 +907,16 @@ func TestCmdSealAddMultiplePathsInProcess(t *testing.T) {
 func TestCmdSealAddRejectsDifferentKeyInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt1, func() {
 		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd: %v", err)
 		}
+	})
 
-		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+	withWorkingDir(t, wt2, func() {
 		err := cmdSealAdd([]string{"tracked.txt"})
 		if err == nil {
 			t.Fatal("expected error when adding path under different key, got nil")
@@ -894,14 +934,16 @@ func TestCmdSealAddRejectsDifferentKeyInProcess(t *testing.T) {
 func TestCmdSealRemoveRejectsDifferentKeyInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt1, func() {
 		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd: %v", err)
 		}
+	})
 
-		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+	withWorkingDir(t, wt2, func() {
 		err := cmdSealRemove([]string{"tracked.txt"})
 		if err == nil {
 			t.Fatal("expected error when removing path owned by different key, got nil")
@@ -913,9 +955,10 @@ func TestCmdSealRemoveRejectsDifferentKeyInProcess(t *testing.T) {
 		if !strings.Contains(err.Error(), "seal-conflict:") {
 			t.Fatalf("expected 'seal-conflict:' prefix, got: %s", err.Error())
 		}
+	})
 
-		// key1's seal must still be intact
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	// key1's seal must still be intact
+	withWorkingDir(t, wt1, func() {
 		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("seal should still be owned by key1 after failed removal: %v", err)
 		}
@@ -925,22 +968,27 @@ func TestCmdSealRemoveRejectsDifferentKeyInProcess(t *testing.T) {
 func TestCmdSealAddReportsAllConflictsInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
-	writeFile(t, filepath.Join(repo, "third.txt"), "content\n")
+	commitFile(t, repo, "second.txt", "content\n")
+	commitFile(t, repo, "third.txt", "content\n")
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
+	wt3 := openManagedWorktree(t, repo, "key3")
+	wt4 := openManagedWorktree(t, repo, "key4")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt1, func() {
 		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd tracked.txt: %v", err)
 		}
-		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+	})
+	withWorkingDir(t, wt2, func() {
 		if err := cmdSealAdd([]string{"second.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd second.txt: %v", err)
 		}
+	})
 
-		// key3 tries to add all three: the error must list both conflicting
-		// paths with the keys that seal them.
-		t.Setenv("GIT_KURA_SEAL_KEY", "key3")
+	// key3 tries to add all three: the error must list both conflicting
+	// paths with the keys that seal them.
+	withWorkingDir(t, wt3, func() {
 		err := cmdSealAdd([]string{"tracked.txt", "second.txt", "third.txt"})
 		if err == nil {
 			t.Fatal("expected conflict error, got nil")
@@ -951,9 +999,10 @@ func TestCmdSealAddReportsAllConflictsInProcess(t *testing.T) {
 				t.Fatalf("conflict error missing %q: %s", want, msg)
 			}
 		}
+	})
 
-		// All-or-nothing: third.txt must not have been sealed.
-		t.Setenv("GIT_KURA_SEAL_KEY", "key4")
+	// All-or-nothing: third.txt must not have been sealed.
+	withWorkingDir(t, wt4, func() {
 		if err := cmdSealAdd([]string{"third.txt"}); err != nil {
 			t.Fatalf("third.txt should not have been sealed by the failed add: %v", err)
 		}
@@ -963,12 +1012,12 @@ func TestCmdSealAddReportsAllConflictsInProcess(t *testing.T) {
 func TestCmdSealAddRejectsDirectoryInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	if err := os.Mkdir(filepath.Join(repo, "subdir"), 0o755); err != nil {
+	wt := openManagedWorktree(t, repo, "key1")
+	if err := os.Mkdir(filepath.Join(wt, "subdir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt, func() {
 		err := cmdSealAdd([]string{"subdir"})
 		if err == nil {
 			t.Fatal("expected error for directory target, got nil")
@@ -982,9 +1031,9 @@ func TestCmdSealAddRejectsDirectoryInProcess(t *testing.T) {
 func TestCmdSealAddNonExistentFileInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt, func() {
 		if err := cmdSealAdd([]string{"nosuchfile.txt"}); err == nil {
 			t.Fatal("expected error for non-existent file, got nil")
 		}
@@ -994,36 +1043,43 @@ func TestCmdSealAddNonExistentFileInProcess(t *testing.T) {
 func TestCmdSealAddOutsideRepoInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt, func() {
 		if err := cmdSealAdd([]string{"../outside.txt"}); err == nil {
 			t.Fatal("expected error for path outside repo, got nil")
 		}
 	})
 }
 
-func TestCmdSealAddInvalidKeyInProcess(t *testing.T) {
-	withWorkingDir(t, t.TempDir(), func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "../../../clobber")
+func TestCmdSealAddEnvMismatchInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "other")
 		if err := cmdSealAdd([]string{"tracked.txt"}); err == nil {
-			t.Fatal("expected error for invalid seal key, got nil")
+			t.Fatal("expected error when GIT_KURA_SEAL_KEY mismatches the worktree key, got nil")
 		}
 	})
 }
 
-func TestCmdSealRemoveInvalidKeyInProcess(t *testing.T) {
-	withWorkingDir(t, t.TempDir(), func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "../../../clobber")
+func TestCmdSealRemoveEnvMismatchInProcess(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
+
+	withWorkingDir(t, wt, func() {
+		t.Setenv("GIT_KURA_SEAL_KEY", "other")
 		if err := cmdSealRemove([]string{"tracked.txt"}); err == nil {
-			t.Fatal("expected error for invalid seal key, got nil")
+			t.Fatal("expected error when GIT_KURA_SEAL_KEY mismatches the worktree key, got nil")
 		}
 	})
 }
 
 func TestCmdSealAddFailsOutsideGitRepo(t *testing.T) {
 	withWorkingDir(t, t.TempDir(), func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
 		if err := cmdSealAdd([]string{"tracked.txt"}); err == nil {
 			t.Fatal("expected error outside git repo, got nil")
 		}
@@ -1032,9 +1088,20 @@ func TestCmdSealAddFailsOutsideGitRepo(t *testing.T) {
 
 func TestCmdSealRemoveFailsOutsideGitRepo(t *testing.T) {
 	withWorkingDir(t, t.TempDir(), func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
 		if err := cmdSealRemove([]string{"tracked.txt"}); err == nil {
 			t.Fatal("expected error outside git repo, got nil")
+		}
+	})
+}
+
+func TestCmdSealAddFailsOutsideManagedWorktree(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	// A plain git checkout that is not a managed worktree must be rejected.
+	withWorkingDir(t, repo, func() {
+		if err := cmdSealAdd([]string{"tracked.txt"}); err == nil {
+			t.Fatal("expected error outside a managed worktree, got nil")
 		}
 	})
 }
@@ -1042,9 +1109,9 @@ func TestCmdSealRemoveFailsOutsideGitRepo(t *testing.T) {
 func TestCmdSealRemoveOutsideRepoInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt, func() {
 		if err := cmdSealRemove([]string{"../outside.txt"}); err == nil {
 			t.Fatal("expected error for path outside repo, got nil")
 		}
@@ -1054,17 +1121,19 @@ func TestCmdSealRemoveOutsideRepoInProcess(t *testing.T) {
 func TestCmdSealRemoveAllowsDifferentKeyAfterRemovalInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt1, func() {
 		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd: %v", err)
 		}
 		if err := cmdSealRemove([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealRemove: %v", err)
 		}
-		// After removal, a different key can now seal the same path
-		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+	})
+	// After removal, a different key can now seal the same path
+	withWorkingDir(t, wt2, func() {
 		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd after removal: %v", err)
 		}
@@ -1074,18 +1143,20 @@ func TestCmdSealRemoveAllowsDifferentKeyAfterRemovalInProcess(t *testing.T) {
 func TestCmdSealRemoveFromMultiPathStoreInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
+	commitFile(t, repo, "second.txt", "content\n")
+	wt1 := openManagedWorktree(t, repo, "key1")
+	wt2 := openManagedWorktree(t, repo, "key2")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt1, func() {
 		if err := cmdSealAdd([]string{"tracked.txt", "second.txt"}); err != nil {
 			t.Fatalf("cmdSealAdd: %v", err)
 		}
 		if err := cmdSealRemove([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("cmdSealRemove tracked.txt: %v", err)
 		}
-		// second.txt is still sealed under key1
-		t.Setenv("GIT_KURA_SEAL_KEY", "key2")
+	})
+	// second.txt is still sealed under key1
+	withWorkingDir(t, wt2, func() {
 		if err := cmdSealAdd([]string{"second.txt"}); err == nil {
 			t.Fatal("expected conflict error for second.txt still sealed under key1, got nil")
 		}
@@ -1095,10 +1166,9 @@ func TestCmdSealRemoveFromMultiPathStoreInProcess(t *testing.T) {
 func TestRunSealAddRemoveInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
+	wt := openManagedWorktree(t, repo, "key1")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
-
+	withWorkingDir(t, wt, func() {
 		if err := run([]string{"seal", "add", "tracked.txt"}); err != nil {
 			t.Fatalf("seal add via run: %v", err)
 		}
@@ -1111,10 +1181,10 @@ func TestRunSealAddRemoveInProcess(t *testing.T) {
 func TestRunSealAddMultiplePathsInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
-	writeFile(t, filepath.Join(repo, "second.txt"), "content\n")
+	commitFile(t, repo, "second.txt", "content\n")
+	wt := openManagedWorktree(t, repo, "key1")
 
-	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+	withWorkingDir(t, wt, func() {
 		if err := run([]string{"seal", "add", "tracked.txt", "second.txt"}); err != nil {
 			t.Fatalf("seal add multiple paths via run: %v", err)
 		}
@@ -1128,8 +1198,9 @@ func TestRunSealAddMissingArgInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
+	// The missing-argument check runs before the seal context is resolved, so
+	// it fails regardless of the current worktree.
 	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
 		if err := run([]string{"seal", "add"}); err == nil {
 			t.Fatal("expected error for missing path arg, got nil")
 		}
@@ -1150,8 +1221,8 @@ func TestRunSealAddRemoveHelpInProcess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seal add --help: %v", err)
 		}
-		if !strings.Contains(stdout, "GIT_KURA_SEAL_KEY") {
-			t.Fatalf("seal add --help missing GIT_KURA_SEAL_KEY: %s", stdout)
+		if !strings.Contains(stdout, "managed worktree") {
+			t.Fatalf("seal add --help should describe worktree-derived key resolution: %s", stdout)
 		}
 
 		stdout, err = captureStdout(t, func() error {
@@ -1160,8 +1231,8 @@ func TestRunSealAddRemoveHelpInProcess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seal remove --help: %v", err)
 		}
-		if !strings.Contains(stdout, "GIT_KURA_SEAL_KEY") {
-			t.Fatalf("seal remove --help missing GIT_KURA_SEAL_KEY: %s", stdout)
+		if !strings.Contains(stdout, "managed worktree") {
+			t.Fatalf("seal remove --help should describe worktree-derived key resolution: %s", stdout)
 		}
 	})
 }
