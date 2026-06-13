@@ -21,6 +21,9 @@ git kura get fizz --format toon # print workspace metadata as TOON for AI prompt
 git kura get fizz --toon        # alias of `--format toon`
 git kura close fizz             # remove the worktree for "fizz"
 git kura ls                     # list all open worktrees
+git kura seal add <path...>     # seal paths under the current seal key
+git kura seal remove <path...>  # unseal paths owned by the current seal key
+git kura seal ls [key]          # list sealed paths (project-wide by default)
 ```
 
 ## `git kura open <key>`
@@ -128,6 +131,14 @@ Additionally, Kura rejects keys that:
 * contain control characters
 * contain shell metacharacters
 * contain Git ref expression syntax such as `"@{"`
+
+## Seal commands
+
+`git kura seal` manages *path seals* and *seal sessions* scoped to a seal key.
+The command reference is below. For the concepts behind these commands — how
+they are classified, the meaning of *project scope*, and which commands depend
+on the current seal key — see
+[Seal commands: context and scope](commands/seal-commands.md).
 
 ## `git kura seal add <path> [path...]`
 
