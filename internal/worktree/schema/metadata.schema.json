@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tooppoo/git-kura/main/internal/worktree/schema/metadata.schema.json",
+  "title": "git kura worktree metadata",
+  "description": "Schema for <git-common-dir>/kura/meta/worktrees/<key>.json, the metadata recorded for a managed worktree.",
+  "type": "object",
+  "required": ["repositoryRoot", "baseBranch", "worktreePath"],
+  "additionalProperties": false,
+  "properties": {
+    "repositoryRoot": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path of the repository the worktree was created from."
+    },
+    "baseBranch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Branch the worktree was based on at creation time."
+    },
+    "worktreePath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path of the managed worktree."
+    }
+  }
+}

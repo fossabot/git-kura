@@ -13,6 +13,7 @@ import (
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
+	"github.com/tooppoo/git-kura/internal/worktree"
 )
 
 const sealPathSchemaVersion = 1
@@ -189,15 +190,13 @@ func normalizeSealPath(repoRoot, rawPath string) (string, error) {
 	return rel, nil
 }
 
+// readSealContext resolves the current seal key from the active git-kura managed worktree.
 func readSealContext() (string, error) {
-	key := os.Getenv("GIT_KURA_SEAL_KEY")
-	if key == "" {
-		return "", fmt.Errorf("no current seal key (GIT_KURA_SEAL_KEY not set)")
+	repoRoot, err := gitutil.RepoRoot()
+	if err != nil {
+		return "", fmt.Errorf("not inside a git repository")
 	}
-	if err := validateKey(key); err != nil {
-		return "", fmt.Errorf("GIT_KURA_SEAL_KEY is invalid: %w", err)
-	}
-	return key, nil
+	return worktree.CurrentKey(repoRoot)
 }
 
 // sealConflict records one path that could not be added/removed because it is

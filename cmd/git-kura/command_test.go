@@ -467,8 +467,8 @@ func TestCmdSealLsListsAllKeysSorted(t *testing.T) {
 			"docs/guide.md": {Key: "key2"},
 		})
 
-		// ls must show every key even when a current seal key is set.
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
+		// ls is repository-wide: it must show every key regardless of the
+		// caller's worktree or environment.
 		stdout, err := captureStdout(t, func() error {
 			return run([]string{"seal", "ls"})
 		})

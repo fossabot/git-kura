@@ -63,6 +63,34 @@ func (c *testCLI) gitKura(dir string, args ...string) cliResult {
 	return c.run(dir, append([]string{"kura"}, args...)...)
 }
 
+// openWorktree creates a managed worktree for key in repo via the built CLI and
+// returns its path. Seal commands derive the current key from the worktree they
+// run in, so tests operate from the returned path rather than from the main
+// checkout.
+func (c *testCLI) openWorktree(t *testing.T, repo, key string) string {
+	t.Helper()
+	res := c.gitKura(repo, "open", key)
+	requireExitCode(t, res, 0)
+	return strings.TrimSpace(res.stdout)
+}
+
+// openManagedWorktree creates a managed worktree for key in repo using the
+// in-process cmdOpen and returns its path. Used by in-process unit tests that
+// call cmdSealAdd/cmdSealRemove directly, which derive the key from the current
+// worktree.
+func openManagedWorktree(t *testing.T, repo, key string) string {
+	t.Helper()
+	var path string
+	withWorkingDir(t, repo, func() {
+		out, err := captureStdout(t, func() error { return cmdOpen(key, openOptions{}) })
+		if err != nil {
+			t.Fatalf("cmdOpen %q: %v", key, err)
+		}
+		path = strings.TrimSpace(out)
+	})
+	return path
+}
+
 func (c *testCLI) posixShell(dir, script string) cliResult {
 	c.t.Helper()
 	cmd := exec.Command("sh", "-c", script)
@@ -167,6 +195,15 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// commitFile writes name into repo and commits it, so the file is present in
+// every managed worktree opened afterward.
+func commitFile(t *testing.T, repo, name, content string) {
+	t.Helper()
+	writeFile(t, filepath.Join(repo, name), content)
+	git(t, repo, "add", name)
+	git(t, repo, "commit", "-m", "add "+name)
 }
 
 func appendFile(t *testing.T, path, content string) {
@@ -317,19 +354,6 @@ func requireStdoutNotContainsLine(t *testing.T, result cliResult, notWant string
 			t.Fatalf("stdout = %q, want no line %q", result.stdout, notWant)
 		}
 	}
-}
-
-// gitKuraWithSealKey runs git kura with GIT_KURA_SEAL_KEY set (or unset when sealKey is "").
-func (c *testCLI) gitKuraWithSealKey(dir, sealKey string, args ...string) cliResult {
-	c.t.Helper()
-	env := filterEnv(append(os.Environ(), "PATH="+c.envPath), "GIT_KURA_SEAL_KEY")
-	if sealKey != "" {
-		env = append(env, "GIT_KURA_SEAL_KEY="+sealKey)
-	}
-	cmd := exec.Command("git", append([]string{"kura"}, args...)...)
-	cmd.Dir = dir
-	cmd.Env = env
-	return runCommand(cmd)
 }
 
 // filterEnv returns a copy of env with all entries for the given key removed.
