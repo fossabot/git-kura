@@ -21,9 +21,9 @@ git kura get fizz --format toon # print workspace metadata as TOON for AI prompt
 git kura get fizz --toon        # alias of `--format toon`
 git kura close fizz             # remove the worktree for "fizz"
 git kura ls                     # list all open worktrees
-git kura seal add <path...>     # seal paths under the current seal key
-git kura seal remove <path...>  # unseal paths owned by the current seal key
-git kura seal ls [key]          # list sealed paths (project-wide by default)
+git kura seal claim <path...>   # claim paths for the current seal key
+git kura seal unclaim <path...> # release the current seal key's claim on paths
+git kura seal ls [key]          # list claimed paths (project-wide by default)
 ```
 
 ## `git kura open <key>`
@@ -140,10 +140,11 @@ they are classified, the meaning of *project scope*, and which commands depend
 on the current seal key — see
 [Seal commands: context and scope](commands/seal-commands.md).
 
-## `git kura seal add <path> [path...]`
+## `git kura seal claim <path> [path...]`
 
-Add one or more repository-relative file paths to the seal store under the
-current key.
+Claim one or more repository-relative file paths for the current key in the
+seal store. Claiming records that the current task intends to edit those paths
+so conflicting edits across tasks/worktrees are detected before merge.
 
 The current key is derived from the git-kura managed worktree you run the
 command in. Move into the worktree created by `git kura open <key>` and that
@@ -151,11 +152,11 @@ worktree's key becomes the current key:
 
 ```sh
 cd "$(git kura get issue-18)"
-git kura seal add src/foo.go
-git kura seal add src/foo.go tests/foo_test.go
+git kura seal claim src/foo.go
+git kura seal claim src/foo.go tests/foo_test.go
 ```
 
-`seal add` fails when it is not run inside a managed worktree, or when that
+`seal claim` fails when it is not run inside a managed worktree, or when that
 worktree's metadata is missing or inconsistent.
 
 Paths are interpreted relative to the repository root regardless of the
@@ -163,38 +164,45 @@ current working directory; absolute paths are rejected. All paths are
 validated before any change is written — if one path fails, the store is not
 modified.
 
-Exits with `seal-conflict` (code 6) if any path is already sealed by a
+Exits with `seal-conflict` (code 6) if any path is already claimed by a
 different key. Exits with `seal-lock-timeout` (code 5) if the store lock
 cannot be acquired within the retry timeout.
 
-## `git kura seal remove <path> [path...]`
+## `git kura seal unclaim <path> [path...]`
 
-Remove one or more file paths from the seal store.
+Release the current key's claim on one or more file paths in the seal store.
 
 ```sh
-git kura seal remove src/foo.go
-git kura seal remove src/foo.go tests/foo_test.go
+git kura seal unclaim src/foo.go
+git kura seal unclaim src/foo.go tests/foo_test.go
 ```
 
-Only the key that originally sealed a path may remove it. Attempting to
-remove a path owned by a different key exits with `seal-conflict` (code 6).
-Paths not currently in the store are silently skipped (idempotent).
+Only the key that claimed a path may release it. Attempting to unclaim a path
+claimed by a different key exits with `seal-conflict` (code 6). Paths not
+currently claimed are silently skipped (idempotent).
+
+## Deprecated aliases: `seal add` / `seal remove`
+
+`git kura seal add` and `git kura seal remove` are deprecated aliases of
+`seal claim` and `seal unclaim` respectively. They behave identically to their
+replacements but print a deprecation warning to stderr, and will be removed in
+a future release. Prefer `claim` / `unclaim` in scripts and agent workflows.
 
 ## `git kura seal ls [key]`
 
-List sealed paths recorded in the seal store, one per line:
+List claimed paths recorded in the seal store, one per line:
 
 ```txt
 <key>	<path>
 ```
 
 ```sh
-git kura seal ls          # every sealed path, across all keys
-git kura seal ls issue-18 # only paths sealed by issue-18
+git kura seal ls          # every claimed path, across all keys
+git kura seal ls issue-18 # only paths claimed by issue-18
 ```
 
-`ls` is a repository-wide inspection command. Unlike `seal add` and
-`seal remove`, it does **not** derive a current key from the worktree: its
+`ls` is a repository-wide inspection command. Unlike `seal claim` and
+`seal unclaim`, it does **not** derive a current key from the worktree: its
 output is the same whether it runs from the main checkout or from inside a
 managed worktree. To inspect a single key, pass the key as an explicit argument
 (validated with the same key rules). See
@@ -205,7 +213,7 @@ The listed scope is the seal store in the Git common dir, shared by all
 worktrees of the repository. Paths are repository-root relative with `/`
 separators. Output is sorted by key, then by path within a key.
 
-An absent store, an empty store, or a key with no sealed paths all produce
+An absent store, an empty store, or a key with no claimed paths all produce
 empty output and exit 0. A store that cannot be parsed, has an unsupported
 `schemaVersion`, or does not match the store schema is an error.
 
@@ -227,6 +235,6 @@ correctly.
 | 5 | Seal lock timeout |
 | 6 | Seal conflict |
 
-Exit codes 5 and 6 are signalled by `seal add` and `seal remove`. The stderr
+Exit codes 5 and 6 are signalled by `seal claim` and `seal unclaim`. The stderr
 message always starts with a stable reason token (`seal-lock-timeout:` or
 `seal-conflict:`) that scripts can match without parsing arbitrary text.

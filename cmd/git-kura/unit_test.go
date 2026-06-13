@@ -822,32 +822,32 @@ func TestReadSealContextOutsideWorktree(t *testing.T) {
 	})
 }
 
-// --- cmdSealAdd / cmdSealRemove in-process tests (need a real git repo) ---
+// --- cmdSealClaim / cmdSealUnclaim in-process tests (need a real git repo) ---
 
-func TestCmdSealAddAndRemoveInProcess(t *testing.T) {
+func TestCmdSealClaimAndRemoveInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
 		}
 		// idempotent: same key, same path
-		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd idempotent: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim idempotent: %v", err)
 		}
-		if err := cmdSealRemove([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealRemove: %v", err)
+		if err := cmdSealUnclaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealUnclaim: %v", err)
 		}
 		// idempotent: not present
-		if err := cmdSealRemove([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealRemove idempotent: %v", err)
+		if err := cmdSealUnclaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealUnclaim idempotent: %v", err)
 		}
 	})
 }
 
-func TestCmdSealAddMultiplePathsInProcess(t *testing.T) {
+func TestCmdSealClaimMultiplePathsInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	commitFile(t, repo, "second.txt", "content\n")
@@ -856,32 +856,32 @@ func TestCmdSealAddMultiplePathsInProcess(t *testing.T) {
 	wt2 := openManagedWorktree(t, repo, "key2")
 
 	withWorkingDir(t, wt1, func() {
-		if err := cmdSealAdd([]string{"tracked.txt", "second.txt", "third.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd multiple paths: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt", "second.txt", "third.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim multiple paths: %v", err)
 		}
 	})
 	// All three should be blocked for a different key
 	withWorkingDir(t, wt2, func() {
-		if err := cmdSealAdd([]string{"second.txt"}); err == nil {
+		if err := cmdSealClaim([]string{"second.txt"}); err == nil {
 			t.Fatal("expected conflict for second.txt, got nil")
 		}
 	})
 }
 
-func TestCmdSealAddRejectsDifferentKeyInProcess(t *testing.T) {
+func TestCmdSealClaimRejectsDifferentKeyInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt1 := openManagedWorktree(t, repo, "key1")
 	wt2 := openManagedWorktree(t, repo, "key2")
 
 	withWorkingDir(t, wt1, func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
 		}
 	})
 
 	withWorkingDir(t, wt2, func() {
-		err := cmdSealAdd([]string{"tracked.txt"})
+		err := cmdSealClaim([]string{"tracked.txt"})
 		if err == nil {
 			t.Fatal("expected error when adding path under different key, got nil")
 		}
@@ -895,20 +895,20 @@ func TestCmdSealAddRejectsDifferentKeyInProcess(t *testing.T) {
 	})
 }
 
-func TestCmdSealRemoveRejectsDifferentKeyInProcess(t *testing.T) {
+func TestCmdSealUnclaimRejectsDifferentKeyInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt1 := openManagedWorktree(t, repo, "key1")
 	wt2 := openManagedWorktree(t, repo, "key2")
 
 	withWorkingDir(t, wt1, func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
 		}
 	})
 
 	withWorkingDir(t, wt2, func() {
-		err := cmdSealRemove([]string{"tracked.txt"})
+		err := cmdSealUnclaim([]string{"tracked.txt"})
 		if err == nil {
 			t.Fatal("expected error when removing path owned by different key, got nil")
 		}
@@ -923,13 +923,13 @@ func TestCmdSealRemoveRejectsDifferentKeyInProcess(t *testing.T) {
 
 	// key1's seal must still be intact
 	withWorkingDir(t, wt1, func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
 			t.Fatalf("seal should still be owned by key1 after failed removal: %v", err)
 		}
 	})
 }
 
-func TestCmdSealAddReportsAllConflictsInProcess(t *testing.T) {
+func TestCmdSealClaimReportsAllConflictsInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	commitFile(t, repo, "second.txt", "content\n")
@@ -940,20 +940,20 @@ func TestCmdSealAddReportsAllConflictsInProcess(t *testing.T) {
 	wt4 := openManagedWorktree(t, repo, "key4")
 
 	withWorkingDir(t, wt1, func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd tracked.txt: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim tracked.txt: %v", err)
 		}
 	})
 	withWorkingDir(t, wt2, func() {
-		if err := cmdSealAdd([]string{"second.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd second.txt: %v", err)
+		if err := cmdSealClaim([]string{"second.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim second.txt: %v", err)
 		}
 	})
 
 	// key3 tries to add all three: the error must list both conflicting
 	// paths with the keys that seal them.
 	withWorkingDir(t, wt3, func() {
-		err := cmdSealAdd([]string{"tracked.txt", "second.txt", "third.txt"})
+		err := cmdSealClaim([]string{"tracked.txt", "second.txt", "third.txt"})
 		if err == nil {
 			t.Fatal("expected conflict error, got nil")
 		}
@@ -967,13 +967,13 @@ func TestCmdSealAddReportsAllConflictsInProcess(t *testing.T) {
 
 	// All-or-nothing: third.txt must not have been sealed.
 	withWorkingDir(t, wt4, func() {
-		if err := cmdSealAdd([]string{"third.txt"}); err != nil {
-			t.Fatalf("third.txt should not have been sealed by the failed add: %v", err)
+		if err := cmdSealClaim([]string{"third.txt"}); err != nil {
+			t.Fatalf("third.txt should not have been claimed by the failed claim: %v", err)
 		}
 	})
 }
 
-func TestCmdSealAddRejectsDirectoryInProcess(t *testing.T) {
+func TestCmdSealClaimRejectsDirectoryInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt := openManagedWorktree(t, repo, "key1")
@@ -982,7 +982,7 @@ func TestCmdSealAddRejectsDirectoryInProcess(t *testing.T) {
 	}
 
 	withWorkingDir(t, wt, func() {
-		err := cmdSealAdd([]string{"subdir"})
+		err := cmdSealClaim([]string{"subdir"})
 		if err == nil {
 			t.Fatal("expected error for directory target, got nil")
 		}
@@ -992,93 +992,93 @@ func TestCmdSealAddRejectsDirectoryInProcess(t *testing.T) {
 	})
 }
 
-func TestCmdSealAddNonExistentFileInProcess(t *testing.T) {
+func TestCmdSealClaimNonExistentFileInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealAdd([]string{"nosuchfile.txt"}); err == nil {
+		if err := cmdSealClaim([]string{"nosuchfile.txt"}); err == nil {
 			t.Fatal("expected error for non-existent file, got nil")
 		}
 	})
 }
 
-func TestCmdSealAddOutsideRepoInProcess(t *testing.T) {
+func TestCmdSealClaimOutsideRepoInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealAdd([]string{"../outside.txt"}); err == nil {
+		if err := cmdSealClaim([]string{"../outside.txt"}); err == nil {
 			t.Fatal("expected error for path outside repo, got nil")
 		}
 	})
 }
 
-func TestCmdSealAddFailsOutsideGitRepo(t *testing.T) {
+func TestCmdSealClaimFailsOutsideGitRepo(t *testing.T) {
 	withWorkingDir(t, t.TempDir(), func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err == nil {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err == nil {
 			t.Fatal("expected error outside git repo, got nil")
 		}
 	})
 }
 
-func TestCmdSealRemoveFailsOutsideGitRepo(t *testing.T) {
+func TestCmdSealUnclaimFailsOutsideGitRepo(t *testing.T) {
 	withWorkingDir(t, t.TempDir(), func() {
-		if err := cmdSealRemove([]string{"tracked.txt"}); err == nil {
+		if err := cmdSealUnclaim([]string{"tracked.txt"}); err == nil {
 			t.Fatal("expected error outside git repo, got nil")
 		}
 	})
 }
 
-func TestCmdSealAddFailsOutsideManagedWorktree(t *testing.T) {
+func TestCmdSealClaimFailsOutsideManagedWorktree(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
 	// A plain git checkout that is not a managed worktree must be rejected.
 	withWorkingDir(t, repo, func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err == nil {
+		if err := cmdSealClaim([]string{"tracked.txt"}); err == nil {
 			t.Fatal("expected error outside a managed worktree, got nil")
 		}
 	})
 }
 
-func TestCmdSealRemoveOutsideRepoInProcess(t *testing.T) {
+func TestCmdSealUnclaimOutsideRepoInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := cmdSealRemove([]string{"../outside.txt"}); err == nil {
+		if err := cmdSealUnclaim([]string{"../outside.txt"}); err == nil {
 			t.Fatal("expected error for path outside repo, got nil")
 		}
 	})
 }
 
-func TestCmdSealRemoveAllowsDifferentKeyAfterRemovalInProcess(t *testing.T) {
+func TestCmdSealUnclaimAllowsDifferentKeyAfterRemovalInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt1 := openManagedWorktree(t, repo, "key1")
 	wt2 := openManagedWorktree(t, repo, "key2")
 
 	withWorkingDir(t, wt1, func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
 		}
-		if err := cmdSealRemove([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealRemove: %v", err)
+		if err := cmdSealUnclaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealUnclaim: %v", err)
 		}
 	})
 	// After removal, a different key can now seal the same path
 	withWorkingDir(t, wt2, func() {
-		if err := cmdSealAdd([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd after removal: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim after removal: %v", err)
 		}
 	})
 }
 
-func TestCmdSealRemoveFromMultiPathStoreInProcess(t *testing.T) {
+func TestCmdSealUnclaimFromMultiPathStoreInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	commitFile(t, repo, "second.txt", "content\n")
@@ -1086,91 +1086,91 @@ func TestCmdSealRemoveFromMultiPathStoreInProcess(t *testing.T) {
 	wt2 := openManagedWorktree(t, repo, "key2")
 
 	withWorkingDir(t, wt1, func() {
-		if err := cmdSealAdd([]string{"tracked.txt", "second.txt"}); err != nil {
-			t.Fatalf("cmdSealAdd: %v", err)
+		if err := cmdSealClaim([]string{"tracked.txt", "second.txt"}); err != nil {
+			t.Fatalf("cmdSealClaim: %v", err)
 		}
-		if err := cmdSealRemove([]string{"tracked.txt"}); err != nil {
-			t.Fatalf("cmdSealRemove tracked.txt: %v", err)
+		if err := cmdSealUnclaim([]string{"tracked.txt"}); err != nil {
+			t.Fatalf("cmdSealUnclaim tracked.txt: %v", err)
 		}
 	})
 	// second.txt is still sealed under key1
 	withWorkingDir(t, wt2, func() {
-		if err := cmdSealAdd([]string{"second.txt"}); err == nil {
+		if err := cmdSealClaim([]string{"second.txt"}); err == nil {
 			t.Fatal("expected conflict error for second.txt still sealed under key1, got nil")
 		}
 	})
 }
 
-func TestRunSealAddRemoveInProcess(t *testing.T) {
+func TestRunSealClaimUnclaimInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := run([]string{"seal", "add", "tracked.txt"}); err != nil {
-			t.Fatalf("seal add via run: %v", err)
+		if err := run([]string{"seal", "claim", "tracked.txt"}); err != nil {
+			t.Fatalf("seal claim via run: %v", err)
 		}
-		if err := run([]string{"seal", "remove", "tracked.txt"}); err != nil {
-			t.Fatalf("seal remove via run: %v", err)
+		if err := run([]string{"seal", "unclaim", "tracked.txt"}); err != nil {
+			t.Fatalf("seal unclaim via run: %v", err)
 		}
 	})
 }
 
-func TestRunSealAddMultiplePathsInProcess(t *testing.T) {
+func TestRunSealClaimMultiplePathsInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 	commitFile(t, repo, "second.txt", "content\n")
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		if err := run([]string{"seal", "add", "tracked.txt", "second.txt"}); err != nil {
-			t.Fatalf("seal add multiple paths via run: %v", err)
+		if err := run([]string{"seal", "claim", "tracked.txt", "second.txt"}); err != nil {
+			t.Fatalf("seal claim multiple paths via run: %v", err)
 		}
-		if err := run([]string{"seal", "remove", "tracked.txt", "second.txt"}); err != nil {
-			t.Fatalf("seal remove multiple paths via run: %v", err)
+		if err := run([]string{"seal", "unclaim", "tracked.txt", "second.txt"}); err != nil {
+			t.Fatalf("seal unclaim multiple paths via run: %v", err)
 		}
 	})
 }
 
-func TestRunSealAddMissingArgInProcess(t *testing.T) {
+func TestRunSealClaimMissingArgInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
 	// The missing-argument check runs before the seal context is resolved, so
 	// it fails regardless of the current worktree.
 	withWorkingDir(t, repo, func() {
-		if err := run([]string{"seal", "add"}); err == nil {
+		if err := run([]string{"seal", "claim"}); err == nil {
 			t.Fatal("expected error for missing path arg, got nil")
 		}
-		if err := run([]string{"seal", "remove"}); err == nil {
+		if err := run([]string{"seal", "unclaim"}); err == nil {
 			t.Fatal("expected error for missing path arg, got nil")
 		}
 	})
 }
 
-func TestRunSealAddRemoveHelpInProcess(t *testing.T) {
+func TestRunSealClaimUnclaimHelpInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
 
 	withWorkingDir(t, repo, func() {
 		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "add", "--help"})
+			return run([]string{"seal", "claim", "--help"})
 		})
 		if err != nil {
-			t.Fatalf("seal add --help: %v", err)
+			t.Fatalf("seal claim --help: %v", err)
 		}
 		if !strings.Contains(stdout, "managed worktree") {
-			t.Fatalf("seal add --help should describe worktree-derived key resolution: %s", stdout)
+			t.Fatalf("seal claim --help should describe worktree-derived key resolution: %s", stdout)
 		}
 
 		stdout, err = captureStdout(t, func() error {
-			return run([]string{"seal", "remove", "--help"})
+			return run([]string{"seal", "unclaim", "--help"})
 		})
 		if err != nil {
-			t.Fatalf("seal remove --help: %v", err)
+			t.Fatalf("seal unclaim --help: %v", err)
 		}
 		if !strings.Contains(stdout, "managed worktree") {
-			t.Fatalf("seal remove --help should describe worktree-derived key resolution: %s", stdout)
+			t.Fatalf("seal unclaim --help should describe worktree-derived key resolution: %s", stdout)
 		}
 	})
 }

@@ -76,7 +76,7 @@ func (c *testCLI) openWorktree(t *testing.T, repo, key string) string {
 
 // openManagedWorktree creates a managed worktree for key in repo using the
 // in-process cmdOpen and returns its path. Used by in-process unit tests that
-// call cmdSealAdd/cmdSealRemove directly, which derive the key from the current
+// call cmdSealClaim/cmdSealUnclaim directly, which derive the key from the current
 // worktree.
 func openManagedWorktree(t *testing.T, repo, key string) string {
 	t.Helper()
