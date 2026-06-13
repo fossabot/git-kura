@@ -1,28 +1,20 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/tooppoo/git-kura/internal/gitutil"
-	"github.com/tooppoo/git-kura/internal/worktree"
 )
 
 const sealHelp = `Usage: git kura seal <subcommand> [args]
 
-Manage the current seal key for the active session.
+Manage sealed paths in the repository-wide seal store.
 
 Subcommands:
-  enter <key> [-- <command...>]  Start a child shell with GIT_KURA_SEAL_KEY=<key>
-  current                        Print the current seal key (GIT_KURA_SEAL_KEY)
   ls [key]                       List sealed paths, optionally filtered by key
-  release                        Remove stale seal sessions
   add <path> [path...]            Add paths to the seal store under the current key
   remove <path> [path...]         Remove paths from the seal store under the current key
 
@@ -37,8 +29,8 @@ repository (the seal store shared by all worktrees). With a key argument,
 lists only the paths sealed by that key.
 
 ls is a repository-wide inspection command: it does NOT read
-GIT_KURA_SEAL_KEY, so its output is the same inside and outside a sealed
-session. To inspect a single key, pass it explicitly.
+GIT_KURA_SEAL_KEY, so its output is the same regardless of the caller's
+environment. To inspect a single key, pass it explicitly.
 
 Output is one line per sealed path:
 
@@ -47,67 +39,46 @@ Output is one line per sealed path:
 Paths are repository-root relative with "/" separators. Lines are sorted
 by key, then by path. An empty store produces no output and exits 0.`
 
-const sealReleaseHelp = `Usage: git kura seal release
-
-Remove stale seal sessions from this repository.
-
-A session is removed only when its parent and child PIDs are confirmed dead.
-TTL-exceeded sessions are NOT removed unless their PIDs are also dead.
-Sessions with unknown liveness are never removed.`
-
-const sealEnterHelp = `Usage: git kura seal enter <key> [-- <command...>]
-
-Start a child shell with GIT_KURA_SEAL_KEY set to <key>.
-The child shell inherits the current environment plus the seal key.
-Exit the child shell with 'exit' or Ctrl-D to return.
-
-If -- <command...> is given, run the command without an interactive shell.`
-
-const sealCurrentHelp = `Usage: git kura seal current
-
-Print the value of GIT_KURA_SEAL_KEY.
-Exits with non-zero if GIT_KURA_SEAL_KEY is not set.`
-
 const sealAddHelp = `Usage: git kura seal add <path> [path...]
 
-Add one or more file paths to the seal store under the current key (GIT_KURA_SEAL_KEY).
+Add one or more file paths to the seal store under the current key.
 
 Paths are interpreted relative to the repository root, regardless of the
 current working directory. Absolute paths are rejected.
 Exits with error if:
-  - GIT_KURA_SEAL_KEY is not set or invalid
+  - no current seal key is available (see "Current key" below)
   - any path is absolute or outside the repository
   - any path does not exist or is a directory
   - any path is already sealed under a different key
 
-If a path is already sealed under the current key, it is skipped (idempotent).`
+If a path is already sealed under the current key, it is skipped (idempotent).
+
+Current key:
+  The current key is currently read from the GIT_KURA_SEAL_KEY environment
+  variable. This is a temporary, internal compatibility mechanism, not the
+  intended workflow: deriving the key from the active git-kura managed
+  worktree is tracked in issue #32. Until then, set GIT_KURA_SEAL_KEY
+  yourself, e.g. GIT_KURA_SEAL_KEY=issue-18 git kura seal add <path>.`
 
 const sealRemoveHelp = `Usage: git kura seal remove <path> [path...]
 
-Remove one or more file paths from the seal store under the current key (GIT_KURA_SEAL_KEY).
+Remove one or more file paths from the seal store under the current key.
 
 Paths are interpreted relative to the repository root, regardless of the
 current working directory. Absolute paths are rejected.
 Exits with error if:
-  - GIT_KURA_SEAL_KEY is not set or invalid
+  - no current seal key is available (see "Current key" below)
   - any path is absolute or outside the repository
   - any path is sealed under a different key
 
-Paths not currently in the seal store are skipped (idempotent).`
+Paths not currently in the seal store are skipped (idempotent).
 
-type sealEnterArgs struct {
-	Key     string
-	Command []string
-}
-
-func argsBeforeDoubleDash(args []string) []string {
-	for i, a := range args {
-		if a == "--" {
-			return args[:i]
-		}
-	}
-	return args
-}
+Current key:
+  The current key is currently read from the GIT_KURA_SEAL_KEY environment
+  variable. This is a temporary, internal compatibility mechanism, not the
+  intended workflow: deriving the key from the active git-kura managed
+  worktree is tracked in issue #32. Until then, set GIT_KURA_SEAL_KEY
+  yourself, e.g. GIT_KURA_SEAL_KEY=issue-18 git kura seal remove <path>.`
 
 func runSeal(args []string) error {
 	if len(args) == 0 {
@@ -118,25 +89,6 @@ func runSeal(args []string) error {
 	case "-h", "--help":
 		fmt.Println(sealHelp)
 		return nil
-	case "enter":
-		if hasHelpFlag(argsBeforeDoubleDash(args[1:])) {
-			fmt.Println(sealEnterHelp)
-			return nil
-		}
-		a, err := parseSealEnterArgs(args[1:])
-		if err != nil {
-			return err
-		}
-		return cmdSealEnter(a)
-	case "current":
-		if hasHelpFlag(args[1:]) {
-			fmt.Println(sealCurrentHelp)
-			return nil
-		}
-		if err := parseSealCurrentArgs(args[1:]); err != nil {
-			return err
-		}
-		return cmdSealCurrent()
 	case "ls":
 		if hasHelpFlag(args[1:]) {
 			fmt.Println(sealLsHelp)
@@ -147,15 +99,6 @@ func runSeal(args []string) error {
 			return err
 		}
 		return cmdSealLs(key)
-	case "release":
-		if hasHelpFlag(args[1:]) {
-			fmt.Println(sealReleaseHelp)
-			return nil
-		}
-		if len(args) > 1 {
-			return fmt.Errorf("usage: git kura seal release: unexpected argument %q", args[1])
-		}
-		return cmdSealRelease()
 	case "add":
 		if hasHelpFlag(args[1:]) {
 			fmt.Println(sealAddHelp)
@@ -202,7 +145,7 @@ func parseSealLsArgs(args []string) (string, error) {
 // lines, sorted by key then path. An empty filterKey lists every key.
 // Per docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md,
 // ls never consults GIT_KURA_SEAL_KEY: inspection scope must not depend on
-// the caller's session. It also reads the store without acquiring
+// the caller's environment. It also reads the store without acquiring
 // paths.lock, so a held lock never blocks listing.
 func cmdSealLs(filterKey string) error {
 	repoRoot, err := gitutil.RepoRoot()
@@ -239,182 +182,4 @@ func cmdSealLs(filterKey string) error {
 	}
 	_, err = os.Stdout.WriteString(b.String())
 	return err
-}
-
-func cmdSealRelease() error {
-	repoRoot, err := gitutil.RepoRoot()
-	if err != nil {
-		return fmt.Errorf("not inside a git repository")
-	}
-	sessDir, err := sealSessionDir(repoRoot)
-	if err != nil {
-		return err
-	}
-	records, err := readAllSealSessions(sessDir)
-	if err != nil {
-		return err
-	}
-
-	var stale, corrupt []sealSessionFile
-	for _, r := range records {
-		switch {
-		case r.Err != nil:
-			corrupt = append(corrupt, r)
-		case !sessionAlive(r.Session):
-			stale = append(stale, r)
-		}
-	}
-
-	var errs []error
-	removed := 0
-
-	if len(stale) == 0 {
-		fmt.Println("No stale sessions found.")
-	} else {
-		fmt.Println("Removing stale sessions:")
-		for _, r := range stale {
-			age := time.Since(r.Session.StartedAt).Truncate(time.Second)
-			fmt.Printf("  %s (key: %s, age: %s)\n", r.Path, r.Session.Key, formatAge(age))
-			ok, removeErr := removeStaleSession(r.Path, r.Session)
-			if removeErr != nil {
-				errs = append(errs, removeErr)
-			} else if ok {
-				removed++
-			}
-		}
-		fmt.Printf("Removed %d stale session(s).\n", removed)
-	}
-
-	if len(corrupt) > 0 {
-		fmt.Println("Warning: corrupt or unreadable session file(s) skipped — inspect manually:")
-		for _, r := range corrupt {
-			fmt.Printf("  %s\n", r.Path)
-		}
-	}
-
-	return errors.Join(errs...)
-}
-
-func formatAge(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	return fmt.Sprintf("%dh", int(d.Hours()))
-}
-
-func parseSealEnterArgs(args []string) (sealEnterArgs, error) {
-	if len(args) == 0 {
-		return sealEnterArgs{}, fmt.Errorf("usage: git kura seal enter <key> [-- <command...>]")
-	}
-
-	key := args[0]
-	if err := validateKey(key); err != nil {
-		return sealEnterArgs{}, err
-	}
-
-	rest := args[1:]
-	if len(rest) == 0 {
-		return sealEnterArgs{Key: key}, nil
-	}
-	if rest[0] != "--" {
-		return sealEnterArgs{}, fmt.Errorf("usage: git kura seal enter <key> [-- <command...>]: unexpected argument %q", rest[0])
-	}
-	if len(rest) < 2 {
-		return sealEnterArgs{}, fmt.Errorf("usage: git kura seal enter <key> -- <command...>: command required after --")
-	}
-	return sealEnterArgs{Key: key, Command: rest[1:]}, nil
-}
-
-func parseSealCurrentArgs(args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("usage: git kura seal current: unexpected argument %q", args[0])
-	}
-	return nil
-}
-
-func cmdSealEnter(a sealEnterArgs) error {
-	repoRoot, err := gitutil.RepoRoot()
-	if err != nil {
-		return fmt.Errorf("not inside a git repository")
-	}
-
-	sessDir, err := sealSessionDir(repoRoot)
-	if err != nil {
-		return err
-	}
-
-	sessPath, sess, err := acquireSealSession(sessDir, repoRoot, a.Key, os.Getpid())
-	if err != nil {
-		return err
-	}
-
-	var cmd *exec.Cmd
-	if len(a.Command) > 0 {
-		cmd = exec.Command(a.Command[0], a.Command[1:]...)
-	} else {
-		cmd = exec.Command(detectShell())
-	}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "GIT_KURA_SEAL_KEY="+a.Key)
-
-	wtPath, wtErr := worktree.Path(repoRoot, a.Key)
-	if wtErr != nil {
-		wtPath = "(unknown)"
-	}
-	fmt.Printf("[kura] entered seal: %s\nworktree: %s\nrun `git kura seal current` to inspect\ntype `exit` to leave\n", a.Key, wtPath)
-
-	if err := cmd.Start(); err != nil {
-		return errors.Join(fmt.Errorf("seal enter: %w", err), deleteSealSession(sessPath))
-	}
-
-	sess.ChildPID = cmd.Process.Pid
-	if err := updateSealSession(sessPath, sess); err != nil {
-		// Session file can't reflect the child PID.  A dead parent with child_pid=0
-		// looks stale to future seal enter callers even while the child shell runs.
-		// Abort: kill the child so the user can retry with a consistent state.
-		killErr := cmd.Process.Kill()
-		// ExitError after Kill is expected (process exits by signal); surface other errors.
-		if waitErr := cmd.Wait(); waitErr != nil && !errors.As(waitErr, new(*exec.ExitError)) {
-			killErr = errors.Join(killErr, fmt.Errorf("wait for killed child: %w", waitErr))
-		}
-		return errors.Join(fmt.Errorf("seal enter: record child PID in session: %w", err), killErr, deleteSealSession(sessPath))
-	}
-
-	waitErr := cmd.Wait()
-	deleteErr := deleteSealSession(sessPath)
-
-	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
-		}
-		return errors.Join(fmt.Errorf("seal enter: %w", waitErr), deleteErr)
-	}
-	return deleteErr
-}
-
-func cmdSealCurrent() error {
-	key := os.Getenv("GIT_KURA_SEAL_KEY")
-	if key == "" {
-		return fmt.Errorf("not in sealed session (GIT_KURA_SEAL_KEY not set), run 'git kura seal enter <key>' to start one")
-	}
-	fmt.Println(key)
-	return nil
-}
-
-func detectShell() string {
-	if runtime.GOOS == "windows" {
-		if _, err := exec.LookPath("pwsh"); err == nil {
-			return "pwsh"
-		}
-		return "cmd.exe"
-	}
-	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell
-	}
-	return "sh"
 }

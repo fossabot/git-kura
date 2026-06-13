@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 // In-process command tests cover dispatch and command branches without spawning
@@ -27,10 +26,7 @@ func TestRunHelpAndUsage(t *testing.T) {
 		{name: "close help", args: []string{"close", "--help"}, want: "Usage: git kura close"},
 		{name: "ls help", args: []string{"ls", "--help"}, want: "Usage: git kura ls"},
 		{name: "seal help (short)", args: []string{"seal", "--help"}, want: "Usage: git kura seal"},
-		{name: "seal enter help", args: []string{"seal", "enter", "--help"}, want: "Usage: git kura seal enter"},
-		{name: "seal current help", args: []string{"seal", "current", "--help"}, want: "Usage: git kura seal current"},
 		{name: "seal ls help", args: []string{"seal", "ls", "--help"}, want: "Usage: git kura seal ls"},
-		{name: "seal release help", args: []string{"seal", "release", "--help"}, want: "Usage: git kura seal release"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := captureStdout(t, func() error {
@@ -44,17 +40,6 @@ func TestRunHelpAndUsage(t *testing.T) {
 			}
 		})
 	}
-
-	// --help after -- must NOT trigger help: the command should fail (command not found or exit)
-	// but must NOT print the seal enter help text.
-	t.Run("seal enter: --help after -- is not help flag", func(t *testing.T) {
-		stdout, _ := captureStdout(t, func() error {
-			return run([]string{"seal", "enter", "key", "--", "--help"})
-		})
-		if strings.Contains(stdout, "Usage: git kura seal enter") {
-			t.Fatalf("stdout = %q: --help after -- must not display seal enter help", stdout)
-		}
-	})
 
 	for _, args := range [][]string{
 		{},
@@ -76,16 +61,11 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"close", "51", "--extra"},
 		{"ls", "unexpected"},
 		{"seal"},
-		{"seal", "enter"},
-		{"seal", "enter", "key", "extra"},
-		{"seal", "enter", "key", "--"},
-		{"seal", "current", "extra"},
 		{"seal", "unknown"},
 		{"seal", "ls", "key1", "key2"},
 		{"seal", "ls", "--all"},
 		{"seal", "ls", "--key", "key1"},
 		{"seal", "ls", "..invalid"},
-		{"seal", "release", "extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := run(args); err == nil {
@@ -305,71 +285,6 @@ func TestRunLsIgnoresNonMetadataEntries(t *testing.T) {
 		lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 		if len(lines) != 1 || lines[0] != "51" {
 			t.Fatalf("ls stdout = %q, want only line \"51\"", stdout)
-		}
-	})
-}
-
-func TestRunSealEnterAndCurrentInProcess(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses Unix commands")
-	}
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	withWorkingDir(t, repo, func() {
-		// seal enter -- true: covers cmdSealEnter success path + updateSealSession
-		if err := run([]string{"seal", "enter", "key1", "--", "true"}); err != nil {
-			t.Fatalf("seal enter error = %v", err)
-		}
-
-		// seal current via run(): covers runSeal line 71
-		t.Setenv("GIT_KURA_SEAL_KEY", "in-process-key")
-		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "current"})
-		})
-		if err != nil {
-			t.Fatalf("seal current error = %v", err)
-		}
-		if strings.TrimSpace(stdout) != "in-process-key" {
-			t.Fatalf("seal current stdout = %q, want in-process-key", stdout)
-		}
-
-		// seal enter with conflict: covers cmdSealEnter error-return at line 119-121
-		sessDir, err := sealSessionDir(repo)
-		if err != nil {
-			t.Fatalf("sealSessionDir: %v", err)
-		}
-		writeSealSessionFile(t, sessDir, sealSession{
-			Key: "occupied-key", WorktreePath: repo,
-			ParentPID: os.Getpid(), StartedAt: time.Now(),
-		})
-		if err := run([]string{"seal", "enter", "other-key", "--", "true"}); err == nil {
-			t.Fatal("seal enter with conflict error = nil, want error")
-		}
-	})
-}
-
-func TestCmdSealEnterDefaultShell(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses Unix shell and /dev/null")
-	}
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	withWorkingDir(t, repo, func() {
-		devNull, err := os.Open("/dev/null")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer devNull.Close() //nolint:errcheck
-		oldStdin := os.Stdin
-		os.Stdin = devNull
-		defer func() { os.Stdin = oldStdin }()
-
-		// SHELL="" causes detectShell() to fall back to "sh"; sh exits immediately on /dev/null stdin.
-		t.Setenv("SHELL", "")
-		if err := cmdSealEnter(sealEnterArgs{Key: "key1"}); err != nil {
-			t.Fatalf("cmdSealEnter with default shell error = %v", err)
 		}
 	})
 }
@@ -663,158 +578,11 @@ func TestCmdSealLsDoesNotBlockOnLock(t *testing.T) {
 	})
 }
 
-func TestCmdSealReleaseNoStale(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PID liveness uses kill(0) which is Unix-specific")
-	}
-
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	withWorkingDir(t, repo, func() {
-		sessDir, err := sealSessionDir(repo)
-		if err != nil {
-			t.Fatalf("sealSessionDir: %v", err)
-		}
-
-		writeSealSessionFile(t, sessDir, sealSession{
-			Key: "active-key", WorktreePath: "/wt-active",
-			ParentPID: os.Getpid(), ChildPID: os.Getpid(), StartedAt: time.Now(),
-		})
-
-		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "release"})
-		})
-		if err != nil {
-			t.Fatalf("seal release error = %v, want nil", err)
-		}
-		if !strings.Contains(strings.ToLower(stdout), "no stale") {
-			t.Fatalf("stdout = %q, want 'no stale' message", stdout)
-		}
-		// Active session must not have been deleted
-		activePath := sealSessionPath(sessDir, "/wt-active")
-		if _, statErr := os.Stat(activePath); statErr != nil {
-			t.Fatalf("active session was unexpectedly deleted: %v", statErr)
-		}
-	})
-}
-
-func TestCmdSealReleaseWithStale(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PID liveness uses kill(0) which is Unix-specific")
-	}
-
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	withWorkingDir(t, repo, func() {
-		sessDir, err := sealSessionDir(repo)
-		if err != nil {
-			t.Fatalf("sealSessionDir: %v", err)
-		}
-
-		dead := deadPIDForTest(t)
-		writeSealSessionFile(t, sessDir, sealSession{
-			Key: "stale-key", WorktreePath: "/wt-stale",
-			ParentPID: dead, StartedAt: time.Now(),
-		})
-		stalePath := sealSessionPath(sessDir, "/wt-stale")
-
-		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "release"})
-		})
-		if err != nil {
-			t.Fatalf("seal release error = %v, want nil", err)
-		}
-		if !strings.Contains(stdout, "stale-key") {
-			t.Fatalf("stdout = %q, want it to mention stale-key", stdout)
-		}
-		if _, statErr := os.Stat(stalePath); !os.IsNotExist(statErr) {
-			t.Fatalf("stale session was not deleted (stat err = %v)", statErr)
-		}
-	})
-}
-
-func TestCmdSealReleaseKeepsTTLOnlyStale(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PID liveness uses kill(0) which is Unix-specific")
-	}
-
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	withWorkingDir(t, repo, func() {
-		sessDir, err := sealSessionDir(repo)
-		if err != nil {
-			t.Fatalf("sealSessionDir: %v", err)
-		}
-
-		// TTL-exceeded but alive PIDs → must NOT be deleted
-		writeSealSessionFile(t, sessDir, sealSession{
-			Key: "ttl-key", WorktreePath: "/wt-ttl",
-			ParentPID: os.Getpid(), ChildPID: os.Getpid(),
-			StartedAt: time.Now().Add(-10 * time.Minute),
-		})
-		ttlPath := sealSessionPath(sessDir, "/wt-ttl")
-
-		if _, err := captureStdout(t, func() error {
-			return run([]string{"seal", "release"})
-		}); err != nil {
-			t.Fatalf("seal release error = %v, want nil", err)
-		}
-
-		if _, statErr := os.Stat(ttlPath); statErr != nil {
-			t.Fatalf("ttl-exceeded-but-alive session was unexpectedly deleted: %v", statErr)
-		}
-	})
-}
-
-func TestCmdSealReleaseWarnsAboutCorrupt(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-
-	withWorkingDir(t, repo, func() {
-		sessDir, err := sealSessionDir(repo)
-		if err != nil {
-			t.Fatalf("sealSessionDir: %v", err)
-		}
-		if err := os.MkdirAll(sessDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		corruptPath := filepath.Join(sessDir, "corrupt.json")
-		if err := os.WriteFile(corruptPath, []byte("not json"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { os.Remove(corruptPath) }) //nolint:errcheck
-
-		stdout, err := captureStdout(t, func() error {
-			return run([]string{"seal", "release"})
-		})
-		if err != nil {
-			t.Fatalf("seal release error = %v, want nil", err)
-		}
-		// corrupt file must be warned about but NOT deleted
-		if !strings.Contains(strings.ToLower(stdout), "corrupt") {
-			t.Fatalf("stdout = %q, want warning about corrupt file", stdout)
-		}
-		if _, statErr := os.Stat(corruptPath); statErr != nil {
-			t.Fatalf("corrupt file was unexpectedly deleted: %v", statErr)
-		}
-	})
-}
-
-func TestCmdSealLsAndReleaseOutsideRepo(t *testing.T) {
+func TestCmdSealLsOutsideRepo(t *testing.T) {
 	outside := t.TempDir()
 	withWorkingDir(t, outside, func() {
-		for _, args := range [][]string{
-			{"seal", "ls"},
-			{"seal", "release"},
-		} {
-			t.Run(strings.Join(args, " "), func(t *testing.T) {
-				if err := run(args); err == nil {
-					t.Fatalf("run(%v) outside repo error = nil, want error", args)
-				}
-			})
+		if err := run([]string{"seal", "ls"}); err == nil {
+			t.Fatal("run(seal ls) outside repo error = nil, want error")
 		}
 	})
 }

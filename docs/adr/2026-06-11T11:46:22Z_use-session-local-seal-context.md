@@ -1,7 +1,19 @@
 # Use Session-local Seal Context for `git kura seal`
 
-* Status: Accepted
+* Status: Superseded
 * Created: 2026-06-11T11:46:22Z
+* Superseded: 2026-06-13
+
+> **Superseded.** The session-local model described here — `git kura seal enter <key>`,
+> the `GIT_KURA_SEAL_KEY` child shell, the worktree session guard, and the
+> `git kura seal current` / `seal session ls` / `seal session clean` / `seal release`
+> commands — has been withdrawn. The current seal key is now derived from the active
+> git-kura managed worktree rather than from a session-local environment variable, so
+> the `enter` / `current` / `session` / `release` commands and the session store were
+> removed in [#29](https://github.com/tooppoo/git-kura/issues/29). Replacing the
+> `seal add` / `seal remove` current-key resolution itself is tracked in
+> [#32](https://github.com/tooppoo/git-kura/issues/32). This document is retained as a
+> historical record of the original decision.
 
 ## Context
 

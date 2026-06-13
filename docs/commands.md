@@ -132,7 +132,17 @@ Additionally, Kura rejects keys that:
 ## `git kura seal add <path> [path...]`
 
 Add one or more repository-relative file paths to the seal store under the
-current key (`GIT_KURA_SEAL_KEY`).
+current key.
+
+> **Note — current key resolution is changing.** `seal add` and `seal remove`
+> currently read the current key from the `GIT_KURA_SEAL_KEY` environment
+> variable. This is a temporary, internal compatibility mechanism, not the
+> intended user-facing workflow: the previous way of establishing it
+> (`git kura seal enter <key>`) has been removed. Until
+> [#32](https://github.com/tooppoo/git-kura/issues/32) replaces this so the key
+> is derived from the active git-kura managed worktree, you must set
+> `GIT_KURA_SEAL_KEY` yourself (for example `GIT_KURA_SEAL_KEY=issue-18 git kura
+> seal add ...`) for the examples below to work.
 
 ```sh
 git kura seal add src/foo.go
@@ -175,10 +185,9 @@ git kura seal ls issue-18 # only paths sealed by issue-18
 ```
 
 `ls` is a repository-wide inspection command. Unlike `seal add` and
-`seal remove`, it does **not** read `GIT_KURA_SEAL_KEY`: running it inside a
-`seal enter` session shows the same repository-wide result as running it
-outside. To inspect a single key, pass the key as an explicit argument
-(validated with the same rules as `seal enter`). See
+`seal remove`, it does **not** read `GIT_KURA_SEAL_KEY`: its output is the
+same regardless of the caller's environment. To inspect a single key, pass
+the key as an explicit argument (validated with the same key rules). See
 [`docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md`](adr/20260612T170922Z_seal-command-current-context-and-scope.md)
 for the rationale.
 
