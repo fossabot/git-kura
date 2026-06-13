@@ -147,7 +147,7 @@ current key.
 
 The current key is derived from the git-kura managed worktree you run the
 command in. Move into the worktree created by `git kura open <key>` and that
-worktree's key becomes the current key — no environment variable is needed:
+worktree's key becomes the current key:
 
 ```sh
 cd "$(git kura get issue-18)"
@@ -156,9 +156,7 @@ git kura seal add src/foo.go tests/foo_test.go
 ```
 
 `seal add` fails when it is not run inside a managed worktree, or when that
-worktree's metadata is missing or inconsistent. As a transitional compatibility
-guard, if `GIT_KURA_SEAL_KEY` is set it must match the worktree-derived key; a
-mismatch fails.
+worktree's metadata is missing or inconsistent.
 
 Paths are interpreted relative to the repository root regardless of the
 current working directory; absolute paths are rejected. All paths are

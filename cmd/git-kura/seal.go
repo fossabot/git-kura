@@ -28,9 +28,9 @@ Without arguments, lists every sealed path across all keys for the whole
 repository (the seal store shared by all worktrees). With a key argument,
 lists only the paths sealed by that key.
 
-ls is a repository-wide inspection command: it does NOT read
-GIT_KURA_SEAL_KEY, so its output is the same regardless of the caller's
-environment. To inspect a single key, pass it explicitly.
+ls is a repository-wide inspection command: it does not derive a current key
+from the worktree, so its output is the same regardless of where it is run.
+To inspect a single key, pass it explicitly.
 
 Output is one line per sealed path:
 
@@ -56,12 +56,9 @@ If a path is already sealed under the current key, it is skipped (idempotent).
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
   run this command from inside the worktree created by "git kura open <key>"
-  and that worktree's key becomes the current key. No environment variable is
-  needed. It fails when the current directory is not inside a managed worktree
-  or when its metadata is missing or inconsistent.
-
-  As a transitional compatibility guard, if GIT_KURA_SEAL_KEY is set it must
-  match the worktree-derived key; a mismatch fails.`
+  and that worktree's key becomes the current key. It fails when the current
+  directory is not inside a managed worktree, or when that worktree's
+  metadata is missing or inconsistent.`
 
 const sealRemoveHelp = `Usage: git kura seal remove <path> [path...]
 
@@ -79,12 +76,9 @@ Paths not currently in the seal store are skipped (idempotent).
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
   run this command from inside the worktree created by "git kura open <key>"
-  and that worktree's key becomes the current key. No environment variable is
-  needed. It fails when the current directory is not inside a managed worktree
-  or when its metadata is missing or inconsistent.
-
-  As a transitional compatibility guard, if GIT_KURA_SEAL_KEY is set it must
-  match the worktree-derived key; a mismatch fails.`
+  and that worktree's key becomes the current key. It fails when the current
+  directory is not inside a managed worktree, or when that worktree's
+  metadata is missing or inconsistent.`
 
 func runSeal(args []string) error {
 	if len(args) == 0 {
@@ -150,9 +144,9 @@ func parseSealLsArgs(args []string) (string, error) {
 // cmdSealLs lists sealed paths from the path seal store as "<key>\t<path>"
 // lines, sorted by key then path. An empty filterKey lists every key.
 // Per docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md,
-// ls never consults GIT_KURA_SEAL_KEY: inspection scope must not depend on
-// the caller's environment. It also reads the store without acquiring
-// paths.lock, so a held lock never blocks listing.
+// ls is always repository-wide: its scope must not depend on the caller's
+// current worktree. It also reads the store without acquiring paths.lock,
+// so a held lock never blocks listing.
 func cmdSealLs(filterKey string) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {

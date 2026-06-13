@@ -1,14 +1,51 @@
 package worktree
 
 import (
+	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tooppoo/git-kura/internal/gitutil"
 )
+
+//go:embed schema/metadata.schema.json
+var metadataSchemaJSON []byte
+
+var metadataSchema = mustCompileMetadataSchema()
+
+func mustCompileMetadataSchema() *jsonschema.Schema {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(metadataSchemaJSON))
+	if err != nil {
+		panic(fmt.Sprintf("parse worktree metadata schema: %v", err))
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("metadata.schema.json", doc); err != nil {
+		panic(fmt.Sprintf("add worktree metadata schema resource: %v", err))
+	}
+	sch, err := c.Compile("metadata.schema.json")
+	if err != nil {
+		panic(fmt.Sprintf("compile worktree metadata schema: %v", err))
+	}
+	return sch
+}
+
+// validateMetadataJSON checks that raw metadata JSON conforms to
+// schema/metadata.schema.json.
+func validateMetadataJSON(data []byte) error {
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("parse metadata: %w", err)
+	}
+	if err := metadataSchema.Validate(inst); err != nil {
+		return fmt.Errorf("metadata does not conform to schema: %w", err)
+	}
+	return nil
+}
 
 type MetadataFile struct {
 	RepositoryRoot string `json:"repositoryRoot"`
@@ -70,16 +107,13 @@ func ReadMetadata(repoRoot, key string) (MetadataFile, error) {
 
 // CurrentKey derives the managed-worktree key from the current git worktree.
 //
-// currentTop is the top-level directory of the current git worktree, i.e. the
-// output of "git rev-parse --show-toplevel". A git-kura managed worktree always
-// lives at "<git-common-dir>/kura/worktrees/<key>", so the key is the single
-// path component below that directory.
+// currentTop is the top-level directory of the current git worktree, i.e. the output of "git rev-parse --show-toplevel".
+// A git-kura managed worktree always lives at "<git-common-dir>/kura/worktrees/<key>", so the key is the single path component below that directory.
 //
 // It fails safely when:
 //   - the current directory is not inside a git-kura managed worktree;
-//   - the worktree's metadata is missing or invalid;
-//   - the metadata records a worktree path that does not match currentTop
-//     (an inconsistent or relocated worktree).
+//   - the worktree's metadata is missing, unparseable, or does not conform to the metadata schema;
+//   - the metadata records a worktree path that does not match currentTop (an inconsistent or relocated worktree).
 func CurrentKey(currentTop string) (string, error) {
 	commonDir, err := gitutil.CommonDir(currentTop)
 	if err != nil {
@@ -103,6 +137,11 @@ func CurrentKey(currentTop string) (string, error) {
 			return "", fmt.Errorf("worktree at %s has no git-kura metadata; it is not a managed worktree", currentTop)
 		}
 		return "", fmt.Errorf("read metadata for key %q: %w", key, err)
+	}
+	// Validate before unmarshalling so a hand-edited or corrupted metadata file
+	// is rejected instead of being silently coerced into the Go struct.
+	if err := validateMetadataJSON(data); err != nil {
+		return "", fmt.Errorf("metadata for key %q is invalid: %w", key, err)
 	}
 	var meta MetadataFile
 	if err := json.Unmarshal(data, &meta); err != nil {

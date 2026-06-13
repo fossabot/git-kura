@@ -800,7 +800,6 @@ func TestReadSealContextInsideWorktree(t *testing.T) {
 	wt := openManagedWorktree(t, repo, "key1")
 
 	withWorkingDir(t, wt, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "")
 		key, err := readSealContext()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -817,43 +816,8 @@ func TestReadSealContextOutsideWorktree(t *testing.T) {
 
 	// The main checkout is a git repository but not a managed worktree.
 	withWorkingDir(t, repo, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "")
 		if _, err := readSealContext(); err == nil {
 			t.Fatal("expected error outside a managed worktree, got nil")
-		}
-	})
-}
-
-func TestReadSealContextEnvMatchTolerated(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt := openManagedWorktree(t, repo, "key1")
-
-	withWorkingDir(t, wt, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "key1")
-		key, err := readSealContext()
-		if err != nil {
-			t.Fatalf("matching GIT_KURA_SEAL_KEY should be tolerated: %v", err)
-		}
-		if key != "key1" {
-			t.Fatalf("got %q, want %q", key, "key1")
-		}
-	})
-}
-
-func TestReadSealContextEnvMismatchFails(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt := openManagedWorktree(t, repo, "key1")
-
-	withWorkingDir(t, wt, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "other")
-		_, err := readSealContext()
-		if err == nil {
-			t.Fatal("expected error when GIT_KURA_SEAL_KEY mismatches worktree key, got nil")
-		}
-		if !strings.Contains(err.Error(), "does not match") {
-			t.Fatalf("error = %q, want it to mention the mismatch", err.Error())
 		}
 	})
 }
@@ -1048,32 +1012,6 @@ func TestCmdSealAddOutsideRepoInProcess(t *testing.T) {
 	withWorkingDir(t, wt, func() {
 		if err := cmdSealAdd([]string{"../outside.txt"}); err == nil {
 			t.Fatal("expected error for path outside repo, got nil")
-		}
-	})
-}
-
-func TestCmdSealAddEnvMismatchInProcess(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt := openManagedWorktree(t, repo, "key1")
-
-	withWorkingDir(t, wt, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "other")
-		if err := cmdSealAdd([]string{"tracked.txt"}); err == nil {
-			t.Fatal("expected error when GIT_KURA_SEAL_KEY mismatches the worktree key, got nil")
-		}
-	})
-}
-
-func TestCmdSealRemoveEnvMismatchInProcess(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt := openManagedWorktree(t, repo, "key1")
-
-	withWorkingDir(t, wt, func() {
-		t.Setenv("GIT_KURA_SEAL_KEY", "other")
-		if err := cmdSealRemove([]string{"tracked.txt"}); err == nil {
-			t.Fatal("expected error when GIT_KURA_SEAL_KEY mismatches the worktree key, got nil")
 		}
 	})
 }

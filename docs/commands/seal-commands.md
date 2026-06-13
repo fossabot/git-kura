@@ -12,10 +12,6 @@ the fresh shell invocations that agent workflows make, without relying on
 process-local state. See
 [`docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md`](../adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md).
 
-`GIT_KURA_SEAL_KEY` is no longer the source of truth. As a transitional
-compatibility guard, if it is set it must match the worktree-derived key; a
-mismatch fails.
-
 Seal commands are classified by their effect and by whether their meaning
 depends on the current seal key. This asymmetry is an intentional design
 decision: read-only is not the deciding factor — semantic dependence on the

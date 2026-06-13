@@ -232,6 +232,18 @@ func TestCurrentKeyInvalidMetadata(t *testing.T) {
 	}
 }
 
+func TestCurrentKeyMetadataViolatesSchema(t *testing.T) {
+	repo := initRepoWithCommit(t)
+	wtTop := addManagedWorktree(t, repo, "51")
+
+	// Parseable JSON, but missing the required baseBranch/worktreePath fields.
+	metaPath := filepath.Join(repo, ".git", "kura", "meta", "worktrees", "51.json")
+	writeFile(t, metaPath, `{"repositoryRoot":"`+repo+`"}`)
+	if _, err := worktree.CurrentKey(wtTop); err == nil {
+		t.Fatal("CurrentKey with schema-violating metadata error = nil, want error")
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 

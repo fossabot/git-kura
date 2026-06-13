@@ -483,26 +483,6 @@ func TestLsShowsOnlyOpenWorktrees(t *testing.T) {
 
 // --- seal add / remove integration tests ---
 
-func TestSealAddRejectsMismatchedEnvKey(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt := cli.openWorktree(t, repo, "key1")
-
-	result := cli.gitKuraWithSealKey(wt, "other", "seal", "add", "tracked.txt")
-	requireNonZeroExitCode(t, result)
-	requireStderrContains(t, result, "does not match")
-}
-
-func TestSealRemoveRejectsMismatchedEnvKey(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	wt := cli.openWorktree(t, repo, "key1")
-
-	result := cli.gitKuraWithSealKey(wt, "other", "seal", "remove", "tracked.txt")
-	requireNonZeroExitCode(t, result)
-	requireStderrContains(t, result, "does not match")
-}
-
 func TestSealAddOutsideWorktreeFails(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
@@ -687,7 +667,7 @@ func TestSealAddLockTimeout(t *testing.T) {
 	_ = f.Close()
 	defer func() { _ = os.Remove(lockPath) }()
 
-	env := filterEnv(filterEnv(append(os.Environ(), "PATH="+cli.envPath), "GIT_KURA_SEAL_KEY"), "GIT_KURA_SEAL_LOCK_TIMEOUT")
+	env := filterEnv(append(os.Environ(), "PATH="+cli.envPath), "GIT_KURA_SEAL_LOCK_TIMEOUT")
 	env = append(env, "GIT_KURA_SEAL_LOCK_TIMEOUT=100ms")
 	cmd := exec.Command("git", "kura", "seal", "add", "tracked.txt")
 	cmd.Dir = wt
