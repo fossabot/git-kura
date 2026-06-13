@@ -21,6 +21,9 @@ git kura get fizz --format toon # print workspace metadata as TOON for AI prompt
 git kura get fizz --toon        # alias of `--format toon`
 git kura close fizz             # remove the worktree for "fizz"
 git kura ls                     # list all open worktrees
+git kura seal add <path...>     # seal paths under the current seal key
+git kura seal remove <path...>  # unseal paths owned by the current seal key
+git kura seal ls [key]          # list sealed paths (project-wide by default)
 ```
 
 ## `git kura open <key>`
@@ -129,6 +132,14 @@ Additionally, Kura rejects keys that:
 * contain shell metacharacters
 * contain Git ref expression syntax such as `"@{"`
 
+## Seal commands
+
+`git kura seal` manages *path seals* and *seal sessions* scoped to a seal key.
+The command reference is below. For the concepts behind these commands — how
+they are classified, the meaning of *project scope*, and which commands depend
+on the current seal key — see
+[Seal commands: context and scope](commands/seal-commands.md).
+
 ## `git kura seal add <path> [path...]`
 
 Add one or more repository-relative file paths to the seal store under the
@@ -179,7 +190,7 @@ git kura seal ls issue-18 # only paths sealed by issue-18
 `seal enter` session shows the same repository-wide result as running it
 outside. To inspect a single key, pass the key as an explicit argument
 (validated with the same rules as `seal enter`). See
-[`docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md`](adr/20260612T170922Z_seal-command-current-context-and-scope.md)
+[Seal commands: context and scope](commands/seal-commands.md)
 for the rationale.
 
 The listed scope is the seal store in the Git common dir, shared by all
