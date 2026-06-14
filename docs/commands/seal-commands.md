@@ -22,7 +22,7 @@ These commands are semantically tied to the active work context and require a va
 | `git kura seal unclaim <file...>` | release the current key's claim (mutation) |
 | `git kura seal test <file...>` | context-validation (read-only) |
 
-`seal test` is read-only, but it answers whether the given files may be handled in the *current* working context, so it is grouped with the mutation commands and requires a current key in v0. With a valid current key, unsealed files and files claimed by the current key are allowed, while files claimed by another key are rejected. v0 does not provide a project-wide validation mode (no `--all` / `--unsealed`).
+`seal test` is read-only, but it answers whether the given files may be handled in the *current* working context, so it is grouped with the mutation commands and requires a current key. With a valid current key, unsealed files and files claimed by the current key are allowed, while files claimed by another key are rejected.
 
 ## Current-independent inspection commands
 
@@ -33,6 +33,6 @@ These commands inspect the project scope by default and must **not** derive a cu
 | `git kura seal ls` | lists project-wide path seals; ignores the current key |
 | `git kura seal doctor` | validates project-wide seal store integrity; ignores the current key |
 
-`seal doctor` is project-wide and read-only in v0: it validates the shared path seal store, must not modify seal state, must not take `paths.lock`, and does not provide `seal doctor --fix`. It reports malformed store structure, invalid schema version, invalid stored paths, and normalized-path duplicates as a store integrity failure rather than as a current-key conflict.
+`seal doctor` is project-wide and read-only: it validates the shared path seal store, must not modify seal state, must not take `paths.lock`, and does not provide `seal doctor --fix`. It reports malformed store structure, invalid schema version, invalid stored paths, and normalized-path duplicates as a store integrity failure rather than as a current-key conflict.
 
 > `seal session ls` and `seal session clean` previously belonged to this classification, operating on repository-level session records. The session-local model they served has been withdrawn (see the [supersession ADR](../adr/20260614T002323Z_supersede-legacy-seal-command-model.md)), so there is currently no maintenance command; same-worktree coordination is handled by the (deferred) worktree-guard commands instead.

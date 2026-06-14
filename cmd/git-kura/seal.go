@@ -104,9 +104,6 @@ path claimed by a different key is a conflict. seal test exits 0 only when every
 path is safe; if any path conflicts it exits with seal-conflict (code 6) and
 reports each conflicting path and the key that claims it.
 
-This command takes no options in v0: --all, --unsealed, and --staged are not
-defined and are rejected.
-
 Current key:
   The current key is derived from the git-kura managed worktree you are in:
   run this command from inside the worktree created by "git kura open <key>"
@@ -126,9 +123,7 @@ on the current worktree or current seal key.
 An absent store is treated as an empty store. If the store is malformed or
 contains invalid paths, seal doctor exits with seal-doctor-error (code 7) and
 reports every problematic store entry it finds. On success it prints nothing
-and exits 0.
-
-This command takes no arguments and no options in v0.`
+and exits 0.`
 
 func runSeal(args []string) error {
 	if len(args) == 0 {

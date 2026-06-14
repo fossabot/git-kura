@@ -107,7 +107,7 @@ A key is an opaque, case-sensitive string identifier.
 
 Kura does not parse keys as numbers. Kura does not resolve keys through GitHub, GitLab, or any issue tracker.
 
-In v0, a key must match:
+Key must match:
 
 ```txt
 [A-Za-z0-9][A-Za-z0-9._-]{0,127}
@@ -178,8 +178,6 @@ A path is safe when it is unclaimed, or already claimed by the current key. A pa
 
 `seal test` exits 0 only when every path is safe. If any path conflicts it exits with `seal-conflict` (code 6) and reports each conflicting path with the key that claims it. `seal test` is read-only: it does not modify the store and does not take the store lock, so it is never blocked by a held `paths.lock`.
 
-In v0 `seal test` takes no options. `--all`, `--unsealed`, and `--staged` are not defined and are rejected; project-wide validation (checking paths without a current key) is intentionally out of scope.
-
 ## `git kura seal ls [key]`
 
 List claimed paths recorded in the seal store, one per line:
@@ -216,8 +214,6 @@ An absent `paths.json` is treated as an empty store and succeeds. A healthy stor
 `doctor` validates the store file structure, `schemaVersion`, entry keys, repository-relative path syntax, `/` path separators, paths that escape the repository root, and paths that would duplicate another entry after normalization. It does not check whether stored paths currently exist in the working tree, whether they are files or directories, or where symlinks point.
 
 If the store is malformed or inconsistent, `doctor` exits with `seal-doctor-error` (code 7) and reports every problematic store entry it finds on stderr, so all issues can be fixed in a single pass. `doctor` is read-only: it does not modify `paths.json`, does not take `paths.lock`, and does not create, remove, or rewrite a lock file.
-
-In v0 `seal doctor` takes no arguments and no options. `git kura seal doctor <key>`, `git kura seal doctor --fix`, and other options are usage errors.
 
 ## Exit codes
 
