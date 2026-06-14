@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,6 +28,7 @@ func TestRunHelpAndUsage(t *testing.T) {
 		{name: "ls help", args: []string{"ls", "--help"}, want: "Usage: git kura ls"},
 		{name: "seal help (short)", args: []string{"seal", "--help"}, want: "Usage: git kura seal"},
 		{name: "seal ls help", args: []string{"seal", "ls", "--help"}, want: "Usage: git kura seal ls"},
+		{name: "seal doctor help", args: []string{"seal", "doctor", "--help"}, want: "Usage: git kura seal doctor"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := captureStdout(t, func() error {
@@ -66,10 +68,30 @@ func TestRunArgumentErrors(t *testing.T) {
 		{"seal", "ls", "--all"},
 		{"seal", "ls", "--key", "key1"},
 		{"seal", "ls", "..invalid"},
+		{"seal", "doctor", "key1"},
+		{"seal", "doctor", "--fix"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := run(args); err == nil {
 				t.Fatalf("run(%v) error = nil, want error", args)
+			}
+		})
+	}
+}
+
+func TestRunSealDoctorUsageErrorsUseExitCode2(t *testing.T) {
+	for _, args := range [][]string{
+		{"seal", "doctor", "key1"},
+		{"seal", "doctor", "--fix"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			err := run(args)
+			if err == nil {
+				t.Fatalf("run(%v) error = nil, want error", args)
+			}
+			var xe *exitError
+			if !errors.As(err, &xe) || xe.code != exitUsageError {
+				t.Fatalf("run(%v) exit code = %v, want %d (err: %v)", args, xe, exitUsageError, err)
 			}
 		})
 	}

@@ -112,6 +112,7 @@ const (
 	exitNotFound        = 4
 	exitSealLockTimeout = 5
 	exitSealConflict    = 6
+	exitSealDoctorError = 7
 )
 
 func main() {

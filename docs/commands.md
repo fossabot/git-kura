@@ -25,6 +25,7 @@ git kura seal claim <path...>   # claim paths for the current seal key
 git kura seal unclaim <path...> # release the current seal key's claim on paths
 git kura seal test <path...>    # check paths against the current seal context
 git kura seal ls [key]          # list claimed paths (project-wide by default)
+git kura seal doctor            # validate the project-wide seal store
 ```
 
 ## `git kura open <key>`
@@ -200,6 +201,24 @@ An absent store, an empty store, or a key with no claimed paths all produce empt
 
 `ls` is read-only and does not take the store lock, so it is never blocked by a held `paths.lock`.
 
+## `git kura seal doctor`
+
+Validate the project-wide path seal store for the Git repository resolved from the current working directory.
+
+```sh
+git kura seal doctor
+```
+
+`doctor` is a repository-wide inspection command. It does **not** derive a current key from the worktree, does **not** read git-kura worktree metadata, and does **not** consult `GIT_KURA_SEAL_KEY`. It can run from the main checkout, from a git-kura managed worktree, or from any other directory inside the Git repository.
+
+An absent `paths.json` is treated as an empty store and succeeds. A healthy store exits 0 and prints nothing to stdout.
+
+`doctor` validates the store file structure, `schemaVersion`, entry keys, repository-relative path syntax, `/` path separators, paths that escape the repository root, and paths that would duplicate another entry after normalization. It does not check whether stored paths currently exist in the working tree, whether they are files or directories, or where symlinks point.
+
+If the store is malformed or inconsistent, `doctor` exits with `seal-doctor-error` (code 7) and reports the problematic store entry on stderr. `doctor` is read-only: it does not modify `paths.json`, does not take `paths.lock`, and does not create, remove, or rewrite a lock file.
+
+In v0 `seal doctor` takes no arguments and no options. `git kura seal doctor <key>`, `git kura seal doctor --fix`, and other options are usage errors.
+
 ## Exit codes
 
 Kura uses stable exit codes so scripts and AI-agent workflows can react correctly.
@@ -213,5 +232,6 @@ Kura uses stable exit codes so scripts and AI-agent workflows can react correctl
 | 4 | Not found |
 | 5 | Seal lock timeout |
 | 6 | Seal conflict |
+| 7 | Seal doctor error |
 
-Exit code 5 is signalled by `seal claim` and `seal unclaim`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. The stderr message always starts with a stable reason token (`seal-lock-timeout:` or `seal-conflict:`) that scripts can match without parsing arbitrary text.
+Exit code 5 is signalled by `seal claim` and `seal unclaim`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. The stderr message always starts with a stable reason token (`seal-lock-timeout:`, `seal-conflict:`, or `seal-doctor-error:`) that scripts can match without parsing arbitrary text.

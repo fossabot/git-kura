@@ -954,6 +954,106 @@ func TestSealLsHelpFlag(t *testing.T) {
 	}
 }
 
+// --- seal doctor integration tests ---
+
+func TestSealDoctorMissingStoreSucceedsSilently(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "doctor")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+	requireEmptyStderr(t, result)
+}
+
+func TestSealDoctorSucceedsFromUnmanagedRepoAndIgnoresEnvKey(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	seedSealStore(t, repo, map[string]sealEntry{
+		"tracked.txt": {Key: "other-key"},
+	})
+
+	t.Setenv("GIT_KURA_SEAL_KEY", "ignored")
+	result := cli.gitKura(repo, "seal", "doctor")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+	requireEmptyStderr(t, result)
+}
+
+func TestSealDoctorDetectsInvalidStoreWithExitCode7(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(storeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(storeFile, []byte(`{"schemaVersion":1,"paths":{"src\\a.go":{"key":"key1"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := cli.gitKura(repo, "seal", "doctor")
+	requireExitCode(t, result, exitSealDoctorError)
+	requireEmptyStdout(t, result)
+	requireStderrContains(t, result, "seal-doctor-error:")
+	requireStderrContains(t, result, `src\\a.go`)
+}
+
+func TestSealDoctorDoesNotCreateOrAcquireLock(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	storeFile := seedSealStore(t, repo, map[string]sealEntry{
+		"tracked.txt": {Key: "key1"},
+	})
+	before := readFileString(t, storeFile)
+	_, lockFile, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	if err := os.WriteFile(lockFile, []byte("held"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_KURA_SEAL_LOCK_TIMEOUT", "1ms")
+	result := cli.gitKura(repo, "seal", "doctor")
+	requireExitCode(t, result, 0)
+	requireEmptyStdout(t, result)
+	requireEmptyStderr(t, result)
+	if got := readFileString(t, storeFile); got != before {
+		t.Fatalf("doctor mutated store: before %q after %q", before, got)
+	}
+	if got := readFileString(t, lockFile); got != "held" {
+		t.Fatalf("doctor mutated lock file: got %q", got)
+	}
+}
+
+func TestSealDoctorUsageErrorsExitCode2(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	for _, args := range [][]string{
+		{"seal", "doctor", "key1"},
+		{"seal", "doctor", "--fix"},
+	} {
+		result := cli.gitKura(repo, args...)
+		requireExitCode(t, result, exitUsageError)
+		requireEmptyStdout(t, result)
+	}
+}
+
+func TestSealDoctorHelpFlag(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+
+	result := cli.gitKura(repo, "seal", "doctor", "--help")
+	requireExitCode(t, result, 0)
+	if !strings.Contains(result.stdout, "Usage: git kura seal doctor") {
+		t.Fatalf("help output = %s, want usage line", result.stdout)
+	}
+}
+
 func TestSealClaimHelpFlag(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)

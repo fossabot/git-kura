@@ -22,6 +22,7 @@ Subcommands:
   claim <path> [path...]         Claim paths for the current key
   unclaim <path> [path...]       Release the current key's claim on paths
   test <path> [path...]          Check paths against the current seal context
+  doctor                         Validate the repository-wide seal store
 
 Run "git kura seal <subcommand> --help" for subcommand-specific help.`
 
@@ -113,6 +114,21 @@ Current key:
   directory is not inside a managed worktree, or when that worktree's
   metadata is missing or inconsistent.`
 
+const sealDoctorHelp = `Usage: git kura seal doctor
+
+Validate the repository-wide path seal store.
+
+seal doctor is read-only: it never modifies the seal store and never takes the
+store lock. It inspects the seal store attached to the Git repository common
+dir, so it can run from any directory inside the repository and does not depend
+on the current worktree or current seal key.
+
+An absent store is treated as an empty store. If the store is malformed or
+contains invalid paths, seal doctor exits with seal-doctor-error (code 7) and
+reports the problematic store entry. On success it prints nothing and exits 0.
+
+This command takes no arguments and no options in v0.`
+
 func runSeal(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: git kura seal <subcommand> [args]")
@@ -138,6 +154,8 @@ func runSeal(args []string) error {
 		return runSealUnclaim(args[1:])
 	case "test":
 		return runSealTest(args[1:])
+	case "doctor":
+		return runSealDoctor(args[1:])
 	default:
 		return fmt.Errorf("unknown seal subcommand: %s", args[0])
 	}
@@ -177,6 +195,17 @@ func runSealTest(args []string) error {
 	return cmdSealTest(paths)
 }
 
+func runSealDoctor(args []string) error {
+	if hasHelpFlag(args) {
+		fmt.Println(sealDoctorHelp)
+		return nil
+	}
+	if err := parseSealDoctorArgs(args); err != nil {
+		return err
+	}
+	return cmdSealDoctor()
+}
+
 // parseSealTestArgs requires at least one positional path and rejects any
 // option. seal test is intentionally option-free in v0: the not-yet-defined
 // --all / --unsealed / --staged modes must error rather than be silently
@@ -191,6 +220,19 @@ func parseSealTestArgs(args []string) ([]string, error) {
 		}
 	}
 	return args, nil
+}
+
+// parseSealDoctorArgs rejects every argument and option. doctor is
+// intentionally option-free in v0: future fix or formatting modes should be
+// added explicitly without silently accepting placeholder flags today.
+func parseSealDoctorArgs(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor: unknown option %q", args[0]))
+	}
+	return exitCodeError(exitUsageError, fmt.Errorf("usage: git kura seal doctor: unexpected argument %q", args[0]))
 }
 
 // parseSealLsArgs accepts at most one positional key argument. Options are
@@ -253,4 +295,22 @@ func cmdSealLs(filterKey string) error {
 	}
 	_, err = os.Stdout.WriteString(b.String())
 	return err
+}
+
+// cmdSealDoctor validates the whole path seal store for the current Git
+// repository. It is repository-wide and read-only: it does not derive a current
+// key, inspect git-kura worktree metadata, or acquire paths.lock.
+func cmdSealDoctor() error {
+	repoRoot, err := gitutil.RepoRoot()
+	if err != nil {
+		return fmt.Errorf("not inside a git repository")
+	}
+	storeFile, _, err := pathsSealStore(repoRoot)
+	if err != nil {
+		return err
+	}
+	if err := doctorSealStore(storeFile); err != nil {
+		return exitCodeError(exitSealDoctorError, fmt.Errorf("seal-doctor-error: %w", err))
+	}
+	return nil
 }
