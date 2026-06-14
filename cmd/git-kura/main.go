@@ -51,6 +51,7 @@ Commands:
   close <key>          Remove the worktree for <key>
   ls                   List all open worktrees
   seal  <subcommand>   Manage path claims in the repository-wide seal store
+  guard <subcommand>   Manage the cooperative guard for the current worktree
 
 Run "git kura <command> --help" for command-specific help.`
 
@@ -113,6 +114,7 @@ const (
 	exitSealLockTimeout = 5
 	exitSealConflict    = 6
 	exitSealDoctorError = 7
+	exitGuardConflict   = 8
 )
 
 func main() {
@@ -185,6 +187,9 @@ func run(args []string) error {
 
 	case "seal":
 		return runSeal(args[1:])
+
+	case "guard":
+		return runGuard(args[1:])
 
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])

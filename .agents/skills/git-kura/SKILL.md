@@ -48,7 +48,19 @@ order. Never start editing before claiming the files you intend to change.
    cd "$(git kura get <key>)"
    ```
 
-3. List the files you plan to change, then claim all of them:
+3. Acquire the cooperative worktree guard before doing any work:
+
+   ```sh
+   git kura guard acquire
+   ```
+
+   This prevents another agent from starting work in the same worktree at the
+   same time. The guard key is the worktree's current key; never pass it as an
+   argument. If `guard acquire` exits with code 8 and prints `guard-active:`,
+   another agent is already using this worktree. Stop and report instead of
+   working around it.
+
+4. List the files you plan to change, then claim all of them:
 
    ```sh
    git kura seal claim <files...>
@@ -58,20 +70,20 @@ order. Never start editing before claiming the files you intend to change.
    file (not a directory). For files you will create, create them first (for
    example with `touch`) and then claim them.
 
-4. If the claim conflicts, stop and report. A cross-key conflict makes
+5. If the claim conflicts, stop and report. A cross-key conflict makes
    `seal claim` exit with code 6 and print `seal-conflict:` along with the key
    that already claims each path. Report the conflicting files and the owning
    key, then pause the task. Do not unclaim another key's paths or edit around
    the conflict.
 
-5. If there is no conflict, make the actual changes. Edit only claimed paths.
+6. If there is no conflict, make the actual changes. Edit only claimed paths.
    If the set of files to change grows, claim the new files before editing
    them.
 
-6. After review, create the PR only when you are told to. Do not push or open a
+7. After review, create the PR only when you are told to. Do not push or open a
    PR before review or before being asked.
 
-7. When told to merge, release every path you claimed:
+8. When told to merge, release every path you claimed:
 
    ```sh
    git kura seal unclaim <files...>
@@ -79,13 +91,19 @@ order. Never start editing before claiming the files you intend to change.
 
    Use `git kura seal ls <key>` to confirm which paths the key still claims.
 
-8. Tear down the worktree:
+9. Release the worktree guard when you finish working in the worktree:
 
    ```sh
-   cd "$(git kura get <key> --root)"   # back to the repository root
-   git kura close <key>                 # delete worktree and branch (after safety check)
-   git pull                             # update main
+   git kura guard release
    ```
+
+10. Tear down the worktree:
+
+    ```sh
+    cd "$(git kura get <key> --root)"   # back to the repository root
+    git kura close <key>                 # delete worktree and branch (after safety check)
+    git pull                             # update main
+    ```
 
 Before finishing, report the key, worktree path, branch, changed files, and
 checks run.
@@ -107,7 +125,18 @@ For reviews:
    cd "$(git kura get <key>)"
    ```
 
-3. Confirm the target:
+3. Acquire the cooperative worktree guard before inspecting the worktree:
+
+   ```sh
+   git kura guard acquire
+   ```
+
+   Review also uses the shared working tree and index, so it takes the guard
+   like implementation does. If `guard acquire` exits with code 8 and prints
+   `guard-active:`, another agent is already using this worktree. Stop and
+   report instead of reviewing around it.
+
+4. Confirm the target:
 
    ```sh
    git status --short
@@ -115,8 +144,13 @@ For reviews:
    git log --oneline --decorate -n 10
    ```
 
-4. Review from inside that worktree.
-5. In review mode, do not edit files unless the user explicitly asks for fixes.
+5. Review from inside that worktree.
+6. In review mode, do not edit files unless the user explicitly asks for fixes.
+7. Release the guard when the review is finished:
+
+   ```sh
+   git kura guard release
+   ```
 
 Lead review responses with bugs, regressions, missing tests, and safety risks.
 If no issues are found, say so and name the checks performed.

@@ -44,6 +44,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Local agent state (skills under .claude/ are tracked; per-workspace memory is not)
+.claude/projects/
+
 # Temporary files
 tmp/
 temp/
