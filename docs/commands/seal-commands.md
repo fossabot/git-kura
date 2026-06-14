@@ -20,8 +20,11 @@ working context is. See
 for the full rationale.
 
 > Of these, `seal claim`, `seal unclaim`, `seal test`, and `seal ls` are
-> implemented in the current release. `seal doctor` and `seal session ls`/`clean`
-> describe the intended v0 design recorded in the ADR.
+> implemented in the current release. `seal doctor` is specified in the ADR but
+> not yet implemented. `seal session ls` / `seal session clean` belonged to the
+> session-local model that has since been withdrawn; the worktree-guard commands
+> take over that role. See
+> [`docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md`](../adr/20260614T002323Z_supersede-legacy-seal-command-model.md).
 
 ## Project scope
 
@@ -60,17 +63,15 @@ narrower key scope must be requested explicitly (for example
 | Command | Notes |
 |---------|-------|
 | `git kura seal ls` | lists project-wide path seals; ignores the current key |
-| `git kura seal session ls` | lists project-wide session records |
-| `git kura seal doctor` | project-wide integrity check |
+| `git kura seal doctor` | project-wide integrity check (specified, not yet implemented) |
 
 `seal doctor` is project-wide and read-only in v0: it must not modify seal
-state and does not provide `seal doctor --fix`.
+state and does not provide `seal doctor --fix`. It is specified in the ADR but
+not yet implemented.
 
-## Current-independent maintenance commands
-
-`git kura seal session clean` operates on repository-level session records, not
-on path seal ownership for the current working context, so it does not use the
-current seal key as a mutation guard. Instead it is controlled by explicit
-safety flags: it is dry-run by default and deletes records only with explicit
-flags such as `--apply`, while wider modes such as `--force` stay explicit and
-are never implied by the current seal key.
+> `seal session ls` and `seal session clean` previously belonged to this
+> classification, operating on repository-level session records. The
+> session-local model they served has been withdrawn (see the
+> [supersession ADR](../adr/20260614T002323Z_supersede-legacy-seal-command-model.md)),
+> so there is currently no maintenance command; same-worktree coordination is
+> handled by the (deferred) worktree-guard commands instead.

@@ -135,7 +135,7 @@ Additionally, Kura rejects keys that:
 
 ## Seal commands
 
-`git kura seal` manages *path seals* and *seal sessions* scoped to a seal key.
+`git kura seal` manages *path seals* scoped to a seal key.
 The command reference is below. For the concepts behind these commands — how
 they are classified, the meaning of *project scope*, and which commands depend
 on the current seal key — see

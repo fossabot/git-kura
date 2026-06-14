@@ -30,8 +30,10 @@ contract no longer follows:
   still used by the store lock).
 - The validation command described as `seal check` in ADR 3 is implemented as
   `seal test`.
-- `seal enter`, `seal session ls`, `seal session clean`, and `seal doctor`
-  were never adopted and have been withdrawn.
+- `seal enter`, `seal session ls`, and `seal session clean` belonged to the
+  session-local model and were withdrawn when that model was replaced.
+  `seal doctor` was specified but never implemented; it was not part of the
+  session model and is deferred, not withdrawn.
 
 So far this drift was recorded only implicitly: ADR 4 carries an inline
 "Partially superseded" note, ADRs 1 and 2 still read as `Accepted` with
@@ -105,22 +107,29 @@ design:
   not consulted.
 - **The command name `seal check`** (ADR 3 section 4). The implemented
   per-path validation command is `seal test`.
-- **`seal enter`, `seal session ls`, `seal session clean`, and `seal doctor`**
-  (ADR 4 inspection/maintenance sections). These were withdrawn and are not
-  part of the current contract.
+- **`seal enter`, `seal session ls`, and `seal session clean`** (ADR 4
+  inspection/maintenance sections, belonging to the session-local model in the
+  superseded session ADR). These were withdrawn when the session-local model
+  was replaced by worktree-derived context and worktree guards. (`seal doctor`
+  is a separate matter — it was never tied to the session model and is deferred,
+  not withdrawn; see section 4.)
 
 ### 4. What is deferred, not superseded
 
-Two parts of ADR 3 remain the intended future design and are **not**
+Some clauses of ADRs 3 and 4 remain the intended future design and are **not**
 superseded — they are simply not implemented yet:
 
 - `seal test --staged` (the commit-time staged-file safety net). `seal test`
   currently rejects `--all` / `--unsealed` / `--staged` rather than silently
   ignoring them, leaving room to add `--staged` later.
 - Worktree guards (`guard acquire` / `guard release` / `guard status`).
+- `seal doctor` (the repository-wide seal-store integrity check, ADR 4). It was
+  specified but never implemented. Unlike `seal session ls` / `seal session
+  clean`, it was not part of the session-local model, so it is deferred rather
+  than superseded.
 
-When these are implemented, they should follow ADR 3, and the implementation
-map should be extended accordingly.
+When these are implemented, they should follow ADRs 3 and 4, and the
+implementation map should be extended accordingly.
 
 ### 5. Status updates to prior ADRs
 
