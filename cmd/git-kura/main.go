@@ -79,7 +79,15 @@ Flags:
 
 const closeHelp = `Usage: git kura close <key>
 
-Remove the git worktree for <key>.`
+Remove the worktree and Kura-managed branch for <key>, and release the path
+seals that <key> holds in the repository-wide seal store.
+
+close takes the seal store lock before any cleanup, so it can fail with
+seal-lock-timeout (exit code 5) when the lock is held, leaving everything
+unchanged.
+
+For the full cleanup order, paths.json handling, and recovery behavior, see
+https://github.com/tooppoo/git-kura/blob/main/docs/commands.md`
 
 const lsHelp = `Usage: git kura ls
 
@@ -527,6 +535,15 @@ func cmdLs() error {
 	return nil
 }
 
+// cmdClose tears down the worktree for key and releases every path seal that
+// key holds, so a closed worktree never leaves stale claims that would block
+// other worktrees from claiming the same paths.
+//
+// The whole teardown runs under the seal store lock so that seal release is
+// atomic with worktree/branch/metadata removal. The cleanup steps run in a
+// fixed order — worktree, branch, seals, metadata — and abort before touching
+// paths.json if the worktree or branch cleanup fails, so a key's seals are only
+// released once its worktree and branch are actually gone.
 func cmdClose(key string) error {
 	repoRoot, err := gitutil.RepoRoot()
 	if err != nil {
@@ -538,21 +555,80 @@ func cmdClose(key string) error {
 		return fmt.Errorf("resolve worktree path: %w", err)
 	}
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
-	}
-
-	cmd := exec.Command("git", "worktree", "remove", path)
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
+	storeFile, lockFile, err := pathsSealStore(repoRoot)
 	if err != nil {
-		return fmt.Errorf("git worktree remove: %w\n%s", err, out)
-	}
-
-	if err := gitutil.DeleteBranch(repoRoot, worktree.BranchName(key)); err != nil {
 		return err
 	}
 
+	// Acquire the seal store lock before any destructive cleanup. A lock that
+	// cannot be acquired fails with seal-lock-timeout (code 5) and leaves the
+	// worktree, branch, paths.json, and metadata untouched.
+	release, err := acquireSealLock(lockFile)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	// Read and validate paths.json before destructive cleanup. An absent store
+	// is treated as empty and cleanup continues; a malformed or schema-invalid
+	// store aborts close before any worktree/branch/paths.json/metadata change.
+	store, err := readSealStore(storeFile)
+	if err != nil {
+		return err
+	}
+
+	// 1. Worktree cleanup. A missing worktree directory is a no-op, so stale
+	//    state (a manually removed directory or an earlier incomplete close) can
+	//    still be recovered. When the directory is gone, prune the dangling
+	//    administrative entry so Git no longer treats the branch as checked out.
+	if _, statErr := os.Stat(path); statErr == nil {
+		cmd := exec.Command("git", "worktree", "remove", path)
+		cmd.Dir = repoRoot
+		out, removeErr := cmd.CombinedOutput()
+		if removeErr != nil {
+			return fmt.Errorf("git worktree remove: %w\n%s", removeErr, out)
+		}
+	} else if os.IsNotExist(statErr) {
+		if err := gitutil.PruneWorktrees(repoRoot); err != nil {
+			return err
+		}
+	} else {
+		return fmt.Errorf("check worktree path: %w", statErr)
+	}
+
+	// 2. Kura-managed branch cleanup. A branch that is already gone is a no-op; a
+	//    branch that exists but cannot be deleted (e.g. unmerged commits) aborts
+	//    close before paths.json is updated, so the key's seals are preserved.
+	branch := worktree.BranchName(key)
+	branchExists, err := gitutil.BranchExists(repoRoot, branch)
+	if err != nil {
+		return err
+	}
+	if branchExists {
+		if err := gitutil.DeleteBranch(repoRoot, branch); err != nil {
+			return err
+		}
+	}
+
+	// 3. Release every seal claimed by this key, leaving other keys' claims
+	//    untouched. Only rewrite paths.json when something actually changed.
+	removed := false
+	for sealedPath, entry := range store.Paths {
+		if entry.Key == key {
+			delete(store.Paths, sealedPath)
+			removed = true
+		}
+	}
+	if removed {
+		if err := writeSealStore(storeFile, store); err != nil {
+			return fmt.Errorf("update seal store: %w", err)
+		}
+	}
+
+	// 4. Metadata cleanup. Failure here does not roll back the completed
+	//    worktree/branch/seal cleanup; re-running close retries just this step,
+	//    which recovers state left behind by a manual deletion or earlier
+	//    incomplete close.
 	meta, err := worktree.MetadataPath(repoRoot, key)
 	if err != nil {
 		return fmt.Errorf("resolve metadata path: %w", err)
