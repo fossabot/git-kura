@@ -39,7 +39,7 @@ Each item below summarizes that range by mapping it onto the implementation.
   - Range that must not be referenced: the command names `git kura seal add/remove` in the ADR
     body. The current command names are `seal claim/unclaim` (see "Semantics of claim / unclaim"
     below).
-- **ADR**: [docs/adr/20260611T114623Z-use-centralized-seal-store.md](../../docs/adr/20260611T114623Z-use-centralized-seal-store.md)
+- **ADR**: [docs/adr/20260611T114623Z_use-centralized-seal-store.md](../../docs/adr/20260611T114623Z_use-centralized-seal-store.md)
 - **Implementation**: [seal_path.go](seal_path.go)
   - `pathsSealStore`
   - `readSealStore`
@@ -65,7 +65,7 @@ Each item below summarizes that range by mapping it onto the implementation.
   - Range that must not be referenced: the command names `git kura seal add/remove` in the ADR
     body and the description of existence checks in `add`/`remove`. The current command names are
     `seal claim/unclaim`.
-- **ADR**: [docs/adr/20260611T114624Z-limit-seal-targets-to-repository-relative-files.md](../../docs/adr/20260611T114624Z-limit-seal-targets-to-repository-relative-files.md)
+- **ADR**: [docs/adr/20260611T114624Z_limit-seal-targets-to-repository-relative-files.md](../../docs/adr/20260611T114624Z_limit-seal-targets-to-repository-relative-files.md)
 - **Implementation**: [seal_path.go](seal_path.go)
   - `normalizeSealPath`
   - `cmdSealClaim`
@@ -82,9 +82,9 @@ Each item below summarizes that range by mapping it onto the implementation.
 - **Overview**: Resolve the current seal key not from a process-local environment variable, but
   from the identity and metadata of the git-kura managed worktree you are currently in.
 - **status**: `implemented`
-- **ADR**: [docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md](../../docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md)
+- **ADR**: [docs/adr/20260613T064651Z_seal-worktree-context-and-worktree-guards.md](../../docs/adr/20260613T064651Z_seal-worktree-context-and-worktree-guards.md)
   - The old session-local model (`seal enter` / `GIT_KURA_SEAL_KEY`) is in
-    [docs/adr/2026-06-11T11:46:22Z_use-session-local-seal-context.md](../../docs/adr/2026-06-11T11:46:22Z_use-session-local-seal-context.md),
+    [docs/adr/20260611T114622Z_use-session-local-seal-context.md](../../docs/adr/20260611T114622Z_use-session-local-seal-context.md),
     but that ADR is `superseded`.
 - **Implementation**:
   - [seal_path.go](seal_path.go) — `readSealContext`
@@ -112,7 +112,7 @@ Each item below summarizes that range by mapping it onto the implementation.
     - `git kura guard acquire/release/status` (worktree guard) — not implemented (`planned`).
     - `seal check --staged` (staged check at commit time) — not implemented (`planned`).
       The closest existing command is `seal test <path...>`.
-- **ADR**: [docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md](../../docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md)
+- **ADR**: [docs/adr/20260613T064651Z_seal-worktree-context-and-worktree-guards.md](../../docs/adr/20260613T064651Z_seal-worktree-context-and-worktree-guards.md)
 - **Related Issue**: [#30](https://github.com/tooppoo/git-kura/issues/30)
 - **Implementation**:
   - [seal.go](seal.go) — `runSeal` / `runSealClaim` / `runSealUnclaim`

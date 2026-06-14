@@ -264,7 +264,7 @@ func cmdSealClaim(rawPaths []string) error {
 			return fmt.Errorf("check path: %w", err)
 		}
 		// Only files can be sealed; directory seals are out of scope (see
-		// docs/adr/20260611T114624Z-limit-seal-targets-to-repository-relative-files.md).
+		// docs/adr/20260611T114624Z_limit-seal-targets-to-repository-relative-files.md).
 		if info.IsDir() {
 			return fmt.Errorf("path %q is a directory; only files can be claimed", rawPath)
 		}

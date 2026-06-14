@@ -14,7 +14,7 @@
 > `seal session clean` inspection and maintenance commands, in
 > [#29](https://github.com/tooppoo/git-kura/issues/29). The current key is derived
 > from the active git-kura managed worktree per
-> [`2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md`](2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md).
+> [`20260613T064651Z_seal-worktree-context-and-worktree-guards.md`](20260613T064651Z_seal-worktree-context-and-worktree-guards.md).
 > `GIT_KURA_SEAL_KEY` no longer participates in current-key resolution at all:
 > [#32](https://github.com/tooppoo/git-kura/issues/32) moved `claim` / `unclaim`
 > onto worktree-derived keys, and [#20](https://github.com/tooppoo/git-kura/issues/20)

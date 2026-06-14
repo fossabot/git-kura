@@ -8,11 +8,11 @@
 The seal feature was designed across four ADRs that were written while the
 command model was still changing:
 
-1. [20260611T114623Z-use-centralized-seal-store.md](20260611T114623Z-use-centralized-seal-store.md)
+1. [20260611T114623Z_use-centralized-seal-store.md](20260611T114623Z_use-centralized-seal-store.md)
    — the centralized `paths.json` / `paths.lock` store and writer lock.
-2. [20260611T114624Z-limit-seal-targets-to-repository-relative-files.md](20260611T114624Z-limit-seal-targets-to-repository-relative-files.md)
+2. [20260611T114624Z_limit-seal-targets-to-repository-relative-files.md](20260611T114624Z_limit-seal-targets-to-repository-relative-files.md)
    — repository-relative path constraints and normalization.
-3. [2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md](2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md)
+3. [20260613T064651Z_seal-worktree-context-and-worktree-guards.md](20260613T064651Z_seal-worktree-context-and-worktree-guards.md)
    — worktree-derived current key, `claim` / `unclaim`, worktree guards.
 4. [20260612T170922Z_seal-command-current-context-and-scope.md](20260612T170922Z_seal-command-current-context-and-scope.md)
    — the read-only-vs-mutation / current-dependent-vs-independent scope rules.

@@ -10,7 +10,7 @@ command runs in: each worktree is created by `git kura open <key>`, so the key
 of the worktree you are in is the current key. This makes the context survive
 the fresh shell invocations that agent workflows make, without relying on
 process-local state. See
-[`docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md`](../adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md).
+[`docs/adr/20260613T064651Z_seal-worktree-context-and-worktree-guards.md`](../adr/20260613T064651Z_seal-worktree-context-and-worktree-guards.md).
 
 Seal commands are classified by their effect and by whether their meaning
 depends on the current seal key. This asymmetry is an intentional design
