@@ -109,3 +109,30 @@
 - **test**:
   - [integration_test.go](integration_test.go) — `TestSealClaim*` / `TestSealUnclaim*`
   - [unit_test.go](unit_test.go) — `TestCmdSealClaim*` / `TestCmdSealUnclaim*` / `TestRunSealClaim*`
+
+---
+
+## seal test / seal ls の context scope
+
+- **概要**: read-only command でも context への依存度を分けて扱う。
+  `seal test` は current key に依存する validation（current-dependent）で、
+  current key が無ければ失敗する。`seal ls` は repository-wide な inspection
+  （current-independent）で、current key を既定の表示 scope に使わず、
+  絞り込みは key 引数で明示する。
+- **status**: `partially superseded`
+  - 現行として参照してよい範囲: read-only-vs-mutation / current-dependent-vs-
+    current-independent の分類と、それが `seal test`（current 依存）・
+    `seal ls`（repository-wide）に適用される点。
+  - 参照してはいけない範囲: 同 ADR が前提とする current key 確立の仕組み。
+    `seal enter` / `GIT_KURA_SEAL_KEY` による確立、および `seal session ls/clean`・
+    `seal doctor` は現行実装ではない（撤回済み / 未実装）。現行の current key は
+    worktree 由来（「managed worktree 由来の current seal key 解決」を参照）。
+    本文の `seal add/remove` という名称も現行は `claim/unclaim`。
+- **ADR**: [docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md](../../docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md)
+  （Status: Partially superseded。冒頭の注記が現行範囲を定義する。）
+- **実装**:
+  - [seal.go](seal.go) — `runSealTest` / `parseSealLsArgs` / `cmdSealLs`
+  - [seal_path.go](seal_path.go) — `cmdSealTest`
+- **test**:
+  - [unit_test.go](unit_test.go) — `TestCmdSealTest*` / `TestRunSealTest*` / `TestCmdSealLs*`
+  - [integration_test.go](integration_test.go) — `TestSealTest*` / `TestSealLs*`
