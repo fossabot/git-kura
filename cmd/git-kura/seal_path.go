@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -104,6 +106,72 @@ func readSealStore(path string) (sealPathStore, error) {
 		store.Paths = make(map[string]sealEntry)
 	}
 	return store, nil
+}
+
+func doctorSealStore(storePath string) error {
+	store, err := readSealStore(storePath)
+	if err != nil {
+		return err
+	}
+
+	rawPaths := make([]string, 0, len(store.Paths))
+	for rawPath := range store.Paths {
+		rawPaths = append(rawPaths, rawPath)
+	}
+	sort.Strings(rawPaths)
+
+	// Validate three integrity properties of every stored entry: each path is
+	// a well-formed, repository-relative location that stays inside the repo;
+	// no two entries collapse to the same canonical path; and every path is
+	// already stored in its canonical (normalized) form. Every violation found
+	// in a single pass is collected and reported together, so the caller sees
+	// all problems at once rather than fixing and re-running one at a time.
+	var violations []error
+	seen := make(map[string]string, len(rawPaths))
+	for _, rawPath := range rawPaths {
+		entry := store.Paths[rawPath]
+
+		canonical, err := canonicalStoredSealPath(rawPath)
+		if err != nil {
+			// Without a canonical form the duplication and normalization checks
+			// below are meaningless for this entry, so record it and move on.
+			violations = append(violations, err)
+			continue
+		}
+		if firstRawPath, ok := seen[canonical]; ok {
+			firstKey := store.Paths[firstRawPath].Key
+			if firstKey != entry.Key {
+				violations = append(violations, fmt.Errorf("store entries %q (key %q) and %q (key %q) refer to the same canonical path %q",
+					firstRawPath, firstKey, rawPath, entry.Key, canonical))
+			} else {
+				violations = append(violations, fmt.Errorf("store entries %q and %q duplicate canonical path %q", firstRawPath, rawPath, canonical))
+			}
+			continue
+		}
+		seen[canonical] = rawPath
+		if canonical != rawPath {
+			violations = append(violations, fmt.Errorf("store entry %q is not normalized; canonical path is %q", rawPath, canonical))
+		}
+	}
+
+	return errors.Join(violations...)
+}
+
+func canonicalStoredSealPath(rawPath string) (string, error) {
+	if rawPath == "" {
+		return "", fmt.Errorf("store entry has empty path")
+	}
+	if strings.Contains(rawPath, `\`) {
+		return "", fmt.Errorf("store entry %q contains a non-/ path separator", rawPath)
+	}
+	if pathpkg.IsAbs(rawPath) || filepath.IsAbs(rawPath) {
+		return "", fmt.Errorf("store entry %q must be repository-relative", rawPath)
+	}
+	clean := pathpkg.Clean(rawPath)
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("store entry %q escapes the repository root", rawPath)
+	}
+	return clean, nil
 }
 
 func writeSealStore(path string, store sealPathStore) error {

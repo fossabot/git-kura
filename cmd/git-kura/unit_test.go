@@ -485,6 +485,196 @@ func TestReadSealStoreRejectsSchemaViolations(t *testing.T) {
 	}
 }
 
+func TestDoctorSealStoreAcceptsMissingEmptyAndValidStores(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+
+	if err := doctorSealStore(storeFile); err != nil {
+		t.Fatalf("doctor missing store: %v", err)
+	}
+	if _, err := os.Stat(storeFile); !os.IsNotExist(err) {
+		t.Fatalf("doctor should not create missing store (stat err: %v)", err)
+	}
+
+	if err := writeSealStore(storeFile, sealPathStore{Paths: map[string]sealEntry{}}); err != nil {
+		t.Fatalf("write empty store: %v", err)
+	}
+	if err := doctorSealStore(storeFile); err != nil {
+		t.Fatalf("doctor empty store: %v", err)
+	}
+
+	if err := writeSealStore(storeFile, sealPathStore{
+		Paths: map[string]sealEntry{"src/a.go": {Key: "key1"}},
+	}); err != nil {
+		t.Fatalf("write valid store: %v", err)
+	}
+	if err := doctorSealStore(storeFile); err != nil {
+		t.Fatalf("doctor valid store: %v", err)
+	}
+}
+
+func TestDoctorSealStoreRejectsInvalidStoreStructure(t *testing.T) {
+	for name, content := range map[string]string{
+		"not json":            `{`,
+		"wrong schemaVersion": `{"schemaVersion":2,"paths":{}}`,
+		"missing paths":       `{"schemaVersion":1}`,
+		"entry key missing":   `{"schemaVersion":1,"paths":{"src/a.go":{}}}`,
+		"entry key empty":     `{"schemaVersion":1,"paths":{"src/a.go":{"key":""}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cli := newTestCLI(t)
+			repo := cli.initRepo(t)
+			storeFile, _, err := pathsSealStore(repo)
+			if err != nil {
+				t.Fatalf("pathsSealStore: %v", err)
+			}
+			if err := os.MkdirAll(filepath.Dir(storeFile), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(storeFile, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := doctorSealStore(storeFile); err == nil {
+				t.Fatal("doctor invalid store error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestDoctorSealStoreRejectsInvalidStoredPaths(t *testing.T) {
+	for name, paths := range map[string]map[string]sealEntry{
+		"outside repo": {
+			"../outside.txt": {Key: "key1"},
+		},
+		"backslash separator": {
+			`src\a.go`: {Key: "key1"},
+		},
+		"not normalized": {
+			"src/./a.go": {Key: "key1"},
+		},
+		"normalized duplicate": {
+			"src/a.go":  {Key: "key1"},
+			"src//a.go": {Key: "key1"},
+			"src/other": {Key: "key1"},
+		},
+		"same canonical path different keys": {
+			"src/a.go":  {Key: "key1"},
+			"src//a.go": {Key: "key2"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cli := newTestCLI(t)
+			repo := cli.initRepo(t)
+			storeFile := seedSealStore(t, repo, paths)
+
+			err := doctorSealStore(storeFile)
+			if err == nil {
+				t.Fatal("doctor invalid path error = nil, want error")
+			}
+			for _, want := range []string{"src", "outside", `\`} {
+				if strings.Contains(name, want) && !strings.Contains(err.Error(), want) {
+					t.Fatalf("doctor error %q should mention %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// TestDoctorSealStoreReportsEveryViolation verifies that doctor does not stop at
+// the first bad entry: a store with several independent problems must surface
+// all of them so the user can fix them in one pass.
+func TestDoctorSealStoreReportsEveryViolation(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	storeFile := seedSealStore(t, repo, map[string]sealEntry{
+		`bad\sep.go`:    {Key: "key1"}, // backslash separator
+		"../escape.txt": {Key: "key1"}, // escapes the repository root
+		"src/./b.go":    {Key: "key1"}, // not normalized
+	})
+
+	err := doctorSealStore(storeFile)
+	if err == nil {
+		t.Fatal("doctor error = nil, want error")
+	}
+	// Each substring uniquely identifies one of the seeded bad entries.
+	for _, want := range []string{"sep.go", "escape.txt", "src/./b.go"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("doctor error %q should mention every violation, missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestCanonicalStoredSealPath(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		rawPath   string
+		want      string
+		wantError string
+	}{
+		{name: "valid", rawPath: "src/a.go", want: "src/a.go"},
+		{name: "empty", rawPath: "", wantError: "empty path"},
+		{name: "absolute", rawPath: "/tmp/a.go", wantError: "repository-relative"},
+		{name: "escape", rawPath: "src/../../a.go", wantError: "escapes"},
+		{name: "backslash", rawPath: `src\a.go`, wantError: "non-/"},
+		{name: "canonical", rawPath: "src/./a.go", want: "src/a.go"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := canonicalStoredSealPath(tc.rawPath)
+			if tc.wantError != "" {
+				if err == nil {
+					t.Fatalf("canonicalStoredSealPath(%q) error = nil, want %q", tc.rawPath, tc.wantError)
+				}
+				if !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("canonicalStoredSealPath(%q) error = %q, want it to contain %q", tc.rawPath, err.Error(), tc.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("canonicalStoredSealPath(%q) error = %v, want nil", tc.rawPath, err)
+			}
+			if got != tc.want {
+				t.Fatalf("canonicalStoredSealPath(%q) = %q, want %q", tc.rawPath, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCmdSealDoctorOutsideRepoFails(t *testing.T) {
+	outside := t.TempDir()
+	withWorkingDir(t, outside, func() {
+		if err := cmdSealDoctor(); err == nil {
+			t.Fatal("cmdSealDoctor outside repo error = nil, want error")
+		}
+	})
+}
+
+func TestCmdSealDoctorReturnsExitCode7ForIntegrityFailures(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	seedSealStore(t, repo, map[string]sealEntry{
+		`src\a.go`: {Key: "key1"},
+	})
+
+	withWorkingDir(t, repo, func() {
+		err := cmdSealDoctor()
+		if err == nil {
+			t.Fatal("cmdSealDoctor invalid store error = nil, want error")
+		}
+		var xe *exitError
+		if !errors.As(err, &xe) || xe.code != exitSealDoctorError {
+			t.Fatalf("cmdSealDoctor exit code = %v, want %d (err: %v)", xe, exitSealDoctorError, err)
+		}
+		if !strings.Contains(err.Error(), "seal-doctor-error:") {
+			t.Fatalf("doctor error should include stable token: %v", err)
+		}
+	})
+}
+
 func TestWriteSealStoreRejectsSchemaViolations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paths.json")
 	// An empty key violates the schema's minLength constraint; the write

@@ -6,7 +6,7 @@ This document explains the *concepts* behind `git kura seal` — how the command
 
 Seal commands are classified by their effect and by whether their meaning depends on the current seal key. This asymmetry is an intentional design decision: read-only is not the deciding factor — semantic dependence on the working context is. See [`docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md`](../adr/20260612T170922Z_seal-command-current-context-and-scope.md) for the full rationale.
 
-> Of these, `seal claim`, `seal unclaim`, `seal test`, and `seal ls` are implemented in the current release. `seal doctor` is specified in the ADR but not yet implemented. `seal session ls` / `seal session clean` belonged to the session-local model that has since been withdrawn; the worktree-guard commands take over that role. See [`docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md`](../adr/20260614T002323Z_supersede-legacy-seal-command-model.md).
+> Of these, `seal claim`, `seal unclaim`, `seal test`, `seal ls`, and `seal doctor` are implemented in the current release. `seal session ls` / `seal session clean` belonged to the session-local model that has since been withdrawn; the worktree-guard commands take over that role. See [`docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md`](../adr/20260614T002323Z_supersede-legacy-seal-command-model.md).
 
 ## Project scope
 
@@ -31,8 +31,8 @@ These commands inspect the project scope by default and must **not** derive a cu
 | Command | Notes |
 |---------|-------|
 | `git kura seal ls` | lists project-wide path seals; ignores the current key |
-| `git kura seal doctor` | project-wide integrity check (specified, not yet implemented) |
+| `git kura seal doctor` | validates project-wide seal store integrity; ignores the current key |
 
-`seal doctor` is project-wide and read-only in v0: it must not modify seal state and does not provide `seal doctor --fix`. It is specified in the ADR but not yet implemented.
+`seal doctor` is project-wide and read-only in v0: it validates the shared path seal store, must not modify seal state, must not take `paths.lock`, and does not provide `seal doctor --fix`. It reports malformed store structure, invalid schema version, invalid stored paths, and normalized-path duplicates as a store integrity failure rather than as a current-key conflict.
 
 > `seal session ls` and `seal session clean` previously belonged to this classification, operating on repository-level session records. The session-local model they served has been withdrawn (see the [supersession ADR](../adr/20260614T002323Z_supersede-legacy-seal-command-model.md)), so there is currently no maintenance command; same-worktree coordination is handled by the (deferred) worktree-guard commands instead.
