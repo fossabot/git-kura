@@ -30,31 +30,65 @@ issue trackers, or resolves PR metadata.
 
 ## Development Workflow
 
-For implementation, docs, tests, or refactors:
+For implementation, docs, tests, or refactors, always follow these steps in
+order. Never start editing before claiming the files you intend to change.
 
-1. Resolve the task key.
-2. Open or reuse the Kura worktree:
+1. Open the Kura worktree at the start of the task:
 
    ```sh
    git kura open <key>
+   ```
+
+   If `git kura open <key>` reports that the branch or worktree already exists,
+   do not create an alternate workspace. Reuse the existing one.
+
+2. Move into the worktree:
+
+   ```sh
    cd "$(git kura get <key>)"
    ```
 
-3. Confirm the active workspace before editing:
+3. List the files you plan to change, then claim all of them:
 
    ```sh
-   git kura get <key> --toon
-   git status --short
-   git branch --show-current
+   git kura seal claim <files...>
    ```
 
-4. Do all task work from inside the resolved worktree.
-5. Before finishing, report the key, worktree path, branch, changed files, and
-   checks run.
+   Claims are repository-root relative and require each path to be an existing
+   file (not a directory). For files you will create, create them first (for
+   example with `touch`) and then claim them.
 
-If `git kura open <key>` reports that the branch or worktree already exists,
-do not create an alternate workspace. Resolve the existing workspace with
-`git kura get <key>`.
+4. If the claim conflicts, stop and report. A cross-key conflict makes
+   `seal claim` exit with code 6 and print `seal-conflict:` along with the key
+   that already claims each path. Report the conflicting files and the owning
+   key, then pause the task. Do not unclaim another key's paths or edit around
+   the conflict.
+
+5. If there is no conflict, make the actual changes. Edit only claimed paths.
+   If the set of files to change grows, claim the new files before editing
+   them.
+
+6. After review, create the PR only when you are told to. Do not push or open a
+   PR before review or before being asked.
+
+7. When told to merge, release every path you claimed:
+
+   ```sh
+   git kura seal unclaim <files...>
+   ```
+
+   Use `git kura seal ls <key>` to confirm which paths the key still claims.
+
+8. Tear down the worktree:
+
+   ```sh
+   cd "$(git kura get <key> --root)"   # back to the repository root
+   git kura close <key>                 # delete worktree and branch (after safety check)
+   git pull                             # update main
+   ```
+
+Before finishing, report the key, worktree path, branch, changed files, and
+checks run.
 
 ## Review Workflow
 
@@ -152,6 +186,9 @@ run the remaining checks.
   used.
 - Do not guess Kura worktree paths manually.
 - Do not use `cd ../...` to find another task workspace.
+- Do not edit a file before claiming it with `git kura seal claim`.
+- Do not unclaim or override another key's seal to work around a conflict;
+  report the conflict and stop instead.
 - Do not run `git kura close <key>` unless the user asks for cleanup.
 - Do not close a dirty worktree without explicit user confirmation.
 - Do not force-delete branches, metadata, or worktree directories.
