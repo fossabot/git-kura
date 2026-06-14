@@ -1,43 +1,46 @@
-# IMPLEMENTATION_MAP（`cmd/git-kura`）
+# IMPLEMENTATION_MAP (`cmd/git-kura`)
 
-> **これは maintainer 向けの実装対応表である。利用者向けの command reference ではない。**
+> **This is an implementation cross-reference for maintainers. It is not a user-facing command reference.**
 >
-> 各 command の使い方は [docs/commands.md](../../docs/commands.md) や
-> [docs/commands/seal-commands.md](../../docs/commands/seal-commands.md) を参照すること。
-> この文書は「仕様の概要」「背景となる ADR」「対応する実装 / schema / test」を結びつけ、
-> 実装を変更するときに関連する設計判断を見落としにくくすることだけを目的とする。
+> For how to use each command, see [docs/commands.md](../../docs/commands.md) and
+> [docs/commands/seal-commands.md](../../docs/commands/seal-commands.md).
+> The sole purpose of this document is to connect each "spec overview", "background ADR", and
+> "corresponding implementation / schema / test", so that related design decisions are less
+> likely to be overlooked when changing the implementation.
 >
-> 仕様の詳細・決定の背景・schema field 一覧・command reference はここに再掲しない。
-> いずれも実装 file / ADR / schema file / `docs/` への参照で代替する。
+> Detailed specs, decision rationale, schema field listings, and command references are not
+> repeated here. All of them are deferred to references to the implementation files / ADRs /
+> schema files / `docs/`.
 
-## status の意味
+## Meaning of status
 
-| status | 意味 |
-|--------|------|
-| `implemented` | 現行実装が ADR の決定どおり |
-| `planned` | ADR にあるが未実装 |
-| `superseded` | 後続 ADR により完全に置き換えられた |
-| `partially superseded` | 決定の一部のみ現行。現行として参照してよい範囲を各項目に明記する |
+| status | meaning |
+|--------|---------|
+| `implemented` | The current implementation matches the ADR's decision |
+| `planned` | Described in an ADR but not yet implemented |
+| `superseded` | Completely replaced by a later ADR |
+| `partially superseded` | Only part of the decision is current. The range that may be referenced as current is stated explicitly in each item |
 
-`partially superseded` の各項目について、どの clause が現行でどの clause が
-置き換えられたかは
-[docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md](../../docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md)
-が authoritative source である。下記の各項目はその範囲を実装に対応づけて要約する。
+For each `partially superseded` item, the authoritative source for which clauses are current and
+which clauses were replaced is
+[docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md](../../docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md).
+Each item below summarizes that range by mapping it onto the implementation.
 
 ---
 
-## seal store の管理方法と writer lock
+## Management of the seal store and the writer lock
 
-- **概要**: path → key の対応を単一の集中 store に保持し、writer lock で
-  concurrent な seal 書き込みの TOCTOU を防ぐ。
+- **Overview**: Hold the path → key mapping in a single centralized store, and use a writer lock
+  to prevent the TOCTOU of concurrent seal writes.
 - **status**: `partially superseded`
-  - 現行として参照してよい範囲: 集中 store の layout
-    （`<git-common-dir>/kura/seals/paths.json` + `paths.lock`）と、
-    `O_CREATE|O_EXCL` による lock・atomic rename 書き込み・lock timeout の仕組み。
-  - 参照してはいけない範囲: ADR 本文の `git kura seal add/remove` という command 名。
-    現行の command 名は `seal claim/unclaim`（後述の「claim / unclaim の意味論」を参照）。
+  - Range that may be referenced as current: the centralized store layout
+    (`<git-common-dir>/kura/seals/paths.json` + `paths.lock`), and the mechanisms of
+    locking via `O_CREATE|O_EXCL`, writing via atomic rename, and the lock timeout.
+  - Range that must not be referenced: the command names `git kura seal add/remove` in the ADR
+    body. The current command names are `seal claim/unclaim` (see "Semantics of claim / unclaim"
+    below).
 - **ADR**: [docs/adr/20260611T114623Z-use-centralized-seal-store.md](../../docs/adr/20260611T114623Z-use-centralized-seal-store.md)
-- **実装**: [seal_path.go](seal_path.go)
+- **Implementation**: [seal_path.go](seal_path.go)
   - `pathsSealStore`
   - `readSealStore`
   - `writeSealStore`
@@ -51,38 +54,39 @@
 
 ---
 
-## seal target path の正規化・制約
+## Normalization and constraints of the seal target path
 
-- **概要**: seal の対象を repository-relative file に限定し、repository root を
-  基準に正規化して store に格納する。
+- **Overview**: Restrict seal targets to repository-relative files, normalize them relative to
+  the repository root, and store them in the store.
 - **status**: `partially superseded`
-  - 現行として参照してよい範囲: path 制約と正規化規則
-    （絶対 path / repository 外の拒否、repository root 基準での解決、
-    forward-slash 格納など）。
-  - 参照してはいけない範囲: ADR 本文の `git kura seal add/remove` という command 名と、
-    `add`/`remove` での存在チェックの記述。現行の command 名は `seal claim/unclaim`。
+  - Range that may be referenced as current: the path constraints and normalization rules
+    (rejecting absolute paths / paths outside the repository, resolving relative to the
+    repository root, storing with forward slashes, etc.).
+  - Range that must not be referenced: the command names `git kura seal add/remove` in the ADR
+    body and the description of existence checks in `add`/`remove`. The current command names are
+    `seal claim/unclaim`.
 - **ADR**: [docs/adr/20260611T114624Z-limit-seal-targets-to-repository-relative-files.md](../../docs/adr/20260611T114624Z-limit-seal-targets-to-repository-relative-files.md)
-- **実装**: [seal_path.go](seal_path.go)
+- **Implementation**: [seal_path.go](seal_path.go)
   - `normalizeSealPath`
   - `cmdSealClaim`
   - `cmdSealUnclaim`
 - **test**: [unit_test.go](unit_test.go)
   - `TestNormalizeSealPath*`
   - `TestSealClaimRejectsAbsolutePath` / `TestSealClaimRejectsPathOutsideRepo`
-    / `TestSealClaimResolvesPathsFromRepoRootNotCwd`（[integration_test.go](integration_test.go)）
+    / `TestSealClaimResolvesPathsFromRepoRootNotCwd` ([integration_test.go](integration_test.go))
 
 ---
 
-## managed worktree 由来の current seal key 解決
+## Resolving the current seal key from the managed worktree
 
-- **概要**: current seal key を process-local な環境変数からではなく、
-  現在いる git-kura 管理 worktree の identity と metadata から解決する。
+- **Overview**: Resolve the current seal key not from a process-local environment variable, but
+  from the identity and metadata of the git-kura managed worktree you are currently in.
 - **status**: `implemented`
 - **ADR**: [docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md](../../docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md)
-  - 旧 session-local model（`seal enter` / `GIT_KURA_SEAL_KEY`）は
-    [docs/adr/2026-06-11T11:46:22Z_use-session-local-seal-context.md](../../docs/adr/2026-06-11T11:46:22Z_use-session-local-seal-context.md)
-    にあるが、この ADR は `superseded`。
-- **実装**:
+  - The old session-local model (`seal enter` / `GIT_KURA_SEAL_KEY`) is in
+    [docs/adr/2026-06-11T11:46:22Z_use-session-local-seal-context.md](../../docs/adr/2026-06-11T11:46:22Z_use-session-local-seal-context.md),
+    but that ADR is `superseded`.
+- **Implementation**:
   - [seal_path.go](seal_path.go) — `readSealContext`
   - [../../internal/worktree/worktree.go](../../internal/worktree/worktree.go) — `CurrentKey`
 - **schema**: [../../internal/worktree/schema/metadata.schema.json](../../internal/worktree/schema/metadata.schema.json)
@@ -92,23 +96,25 @@
 
 ---
 
-## claim / unclaim の意味論
+## Semantics of claim / unclaim
 
-- **概要**: 現在の task key が、編集前に repository-relative path の所有権を主張
-  （claim）・解放（unclaim）する。別 key が claim 済みの path は cross-worktree
-  conflict として拒否する。
+- **Overview**: The current task key asserts (claim) or releases (unclaim) ownership of a
+  repository-relative path before editing. A path already claimed by a different key is rejected
+  as a cross-worktree conflict.
 - **status**: `partially superseded`
-  - 現行として参照してよい範囲: `seal claim` / `seal unclaim` の意味論と、
-    current key を worktree から解決する方針。
-  - 参照してはいけない範囲: 同 ADR の以下は現行実装ではない。
-    - `seal add` / `seal remove` の deprecated alias 維持
-      — alias は残さず削除済み（現行 command は `claim` / `unclaim` のみ）。
-    - `git kura guard acquire/release/status`（worktree guard）— 未実装（`planned`）。
-    - `seal check --staged`（commit 時の staged check）— 未実装（`planned`）。
-      現行に存在する近接 command は `seal test <path...>`。
+  - Range that may be referenced as current: the semantics of `seal claim` / `seal unclaim`, and
+    the policy of resolving the current key from the worktree.
+  - Range that must not be referenced: the following in the same ADR are not the current
+    implementation.
+    - Keeping deprecated aliases `seal add` / `seal remove`
+      — the aliases were not kept and have been removed (the current commands are only
+      `claim` / `unclaim`).
+    - `git kura guard acquire/release/status` (worktree guard) — not implemented (`planned`).
+    - `seal check --staged` (staged check at commit time) — not implemented (`planned`).
+      The closest existing command is `seal test <path...>`.
 - **ADR**: [docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md](../../docs/adr/2026-06-13T06:46:51Z_seal-worktree-context-and-worktree-guards.md)
-- **関連 Issue**: [#30](https://github.com/tooppoo/git-kura/issues/30)
-- **実装**:
+- **Related Issue**: [#30](https://github.com/tooppoo/git-kura/issues/30)
+- **Implementation**:
   - [seal.go](seal.go) — `runSeal` / `runSealClaim` / `runSealUnclaim`
   - [seal_path.go](seal_path.go) — `cmdSealClaim` / `cmdSealUnclaim` / `sealConflictError`
 - **test**:
@@ -117,25 +123,26 @@
 
 ---
 
-## seal test / seal ls の context scope
+## Context scope of seal test / seal ls
 
-- **概要**: read-only command でも context への依存度を分けて扱う。
-  `seal test` は current key に依存する validation（current-dependent）で、
-  current key が無ければ失敗する。`seal ls` は repository-wide な inspection
-  （current-independent）で、current key を既定の表示 scope に使わず、
-  絞り込みは key 引数で明示する。
+- **Overview**: Even among read-only commands, the degree of dependence on context is treated
+  differently. `seal test` is a validation that depends on the current key (current-dependent)
+  and fails if there is no current key. `seal ls` is a repository-wide inspection
+  (current-independent): it does not use the current key as the default display scope, and any
+  filtering is specified explicitly via a key argument.
 - **status**: `partially superseded`
-  - 現行として参照してよい範囲: read-only-vs-mutation / current-dependent-vs-
-    current-independent の分類と、それが `seal test`（current 依存）・
-    `seal ls`（repository-wide）に適用される点。
-  - 参照してはいけない範囲: 同 ADR が前提とする current key 確立の仕組み。
-    `seal enter` / `GIT_KURA_SEAL_KEY` による確立、および `seal session ls/clean`・
-    `seal doctor` は現行実装ではない（撤回済み / 未実装）。現行の current key は
-    worktree 由来（「managed worktree 由来の current seal key 解決」を参照）。
-    本文の `seal add/remove` という名称も現行は `claim/unclaim`。
+  - Range that may be referenced as current: the read-only-vs-mutation /
+    current-dependent-vs-current-independent classification, and the fact that it applies to
+    `seal test` (current-dependent) and `seal ls` (repository-wide).
+  - Range that must not be referenced: the mechanism for establishing the current key assumed by
+    the same ADR. Establishment via `seal enter` / `GIT_KURA_SEAL_KEY`, as well as
+    `seal session ls/clean` and `seal doctor`, are not the current implementation (withdrawn /
+    not implemented). The current key derives from the worktree (see "Resolving the current seal
+    key from the managed worktree"). The names `seal add/remove` in the body are also
+    `claim/unclaim` in the current implementation.
 - **ADR**: [docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md](../../docs/adr/20260612T170922Z_seal-command-current-context-and-scope.md)
-  （Status: Partially superseded。冒頭の注記が現行範囲を定義する。）
-- **実装**:
+  (Status: Partially superseded. The note at the top defines the current range.)
+- **Implementation**:
   - [seal.go](seal.go) — `runSealTest` / `parseSealLsArgs` / `cmdSealLs`
   - [seal_path.go](seal_path.go) — `cmdSealTest`
 - **test**:

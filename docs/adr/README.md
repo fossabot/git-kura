@@ -48,7 +48,6 @@ Useful commands:
 
 ```sh
 date -u +"%Y%m%dT%H%M%SZ"
-date -u +"%Y-%m-%dT%H:%M:%SZ"
 ```
 
 ## Status Values
