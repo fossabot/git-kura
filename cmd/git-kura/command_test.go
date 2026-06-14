@@ -609,10 +609,6 @@ func TestCmdSealLsOutsideRepo(t *testing.T) {
 	})
 }
 
-// In-process close tests exercise cmdClose's seal-release, lock, validation,
-// and recovery branches so they count toward coverage (the binary-level
-// integration tests run in a subprocess and do not).
-
 func TestRunCloseReleasesSealsInProcess(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
