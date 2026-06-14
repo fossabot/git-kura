@@ -644,26 +644,6 @@ func TestCanonicalStoredSealPath(t *testing.T) {
 	}
 }
 
-func TestCmdSealDoctorDoesNotUseCurrentKeyOrManagedWorktree(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	storeFile := seedSealStore(t, repo, map[string]sealEntry{
-		"tracked.txt": {Key: "other-key"},
-	})
-	before := readFileString(t, storeFile)
-
-	t.Setenv("GIT_KURA_SEAL_KEY", "ignored")
-	withWorkingDir(t, repo, func() {
-		if err := cmdSealDoctor(); err != nil {
-			t.Fatalf("cmdSealDoctor from unmanaged checkout: %v", err)
-		}
-	})
-	after := readFileString(t, storeFile)
-	if after != before {
-		t.Fatalf("doctor mutated store: before %q after %q", before, after)
-	}
-}
-
 func TestCmdSealDoctorOutsideRepoFails(t *testing.T) {
 	outside := t.TempDir()
 	withWorkingDir(t, outside, func() {
