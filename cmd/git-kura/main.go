@@ -86,8 +86,8 @@ close takes the seal store lock before any cleanup, so it can fail with
 seal-lock-timeout (exit code 5) when the lock is held, leaving everything
 unchanged.
 
-See docs/commands.md for the full cleanup order, paths.json handling, and
-recovery behavior.`
+For the full cleanup order, paths.json handling, and recovery behavior, see
+https://github.com/tooppoo/git-kura/blob/main/docs/commands.md`
 
 const lsHelp = `Usage: git kura ls
 
