@@ -62,6 +62,94 @@ func TestDeleteBranch(t *testing.T) {
 	})
 }
 
+func TestBranchExists(t *testing.T) {
+	t.Run("true for existing branch", func(t *testing.T) {
+		repo := initRepo(t)
+		gitCmd(t, repo, "branch", "feature")
+
+		exists, err := gitutil.BranchExists(repo, "feature")
+		if err != nil {
+			t.Fatalf("BranchExists error = %v", err)
+		}
+		if !exists {
+			t.Fatal("BranchExists existing branch = false, want true")
+		}
+	})
+
+	t.Run("true for the current branch", func(t *testing.T) {
+		repo := initRepo(t)
+
+		exists, err := gitutil.BranchExists(repo, "main")
+		if err != nil {
+			t.Fatalf("BranchExists error = %v", err)
+		}
+		if !exists {
+			t.Fatal("BranchExists current branch = false, want true")
+		}
+	})
+
+	t.Run("false for absent branch", func(t *testing.T) {
+		repo := initRepo(t)
+
+		exists, err := gitutil.BranchExists(repo, "no-such-branch")
+		if err != nil {
+			t.Fatalf("BranchExists error = %v", err)
+		}
+		if exists {
+			t.Fatal("BranchExists absent branch = true, want false")
+		}
+	})
+
+	t.Run("error outside a git repository", func(t *testing.T) {
+		dir := t.TempDir()
+
+		if _, err := gitutil.BranchExists(dir, "main"); err == nil {
+			t.Fatal("BranchExists outside git repo error = nil, want error")
+		}
+	})
+}
+
+func TestPruneWorktrees(t *testing.T) {
+	t.Run("removes registration for a deleted worktree directory", func(t *testing.T) {
+		repo := initRepo(t)
+		linked := filepath.Join(t.TempDir(), "linked")
+		gitCmd(t, repo, "worktree", "add", "-b", "linked", linked)
+
+		// Simulate a manual deletion of the worktree directory. Git still holds
+		// the administrative entry (and considers "linked" checked out) until
+		// the entry is pruned.
+		if err := os.RemoveAll(linked); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := gitutil.PruneWorktrees(repo); err != nil {
+			t.Fatalf("PruneWorktrees error = %v", err)
+		}
+
+		// After pruning, the branch is no longer considered checked out, so it
+		// can be deleted.
+		if err := gitutil.DeleteBranch(repo, "linked"); err != nil {
+			t.Fatalf("DeleteBranch after prune error = %v", err)
+		}
+	})
+
+	t.Run("is a no-op when there is nothing to prune", func(t *testing.T) {
+		repo := initRepo(t)
+
+		if err := gitutil.PruneWorktrees(repo); err != nil {
+			t.Fatalf("PruneWorktrees error = %v", err)
+		}
+	})
+
+	t.Run("error outside a git repository", func(t *testing.T) {
+		dir := t.TempDir()
+
+		if err := gitutil.PruneWorktrees(dir); err == nil {
+			t.Fatal("PruneWorktrees outside git repo error = nil, want error")
+		}
+	})
+}
+
 func TestWorktreeDirty(t *testing.T) {
 	t.Run("clean worktree returns false", func(t *testing.T) {
 		repo := initRepo(t)

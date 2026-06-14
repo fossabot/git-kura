@@ -78,13 +78,17 @@ See [output-format.md](output-format.md) for the full metadata schema and output
 
 ## `git kura close <key>`
 
-Remove the worktree and Kura-managed branch associated with the given key.
+Remove the worktree and Kura-managed branch associated with the given key, and release every path seal that the key holds in the repository-wide seal store. This keeps a closed worktree from leaving stale claims that would block other worktrees from claiming the same paths.
 
 ```sh
 git kura close 51
 ```
 
 Kura should refuse to remove a worktree when doing so would discard uncommitted changes unless explicitly instructed.
+
+`close` takes the seal store lock (`paths.lock`) at the start, before any cleanup, so that releasing the key's seals is atomic with removing its worktree, branch, and metadata. If the lock cannot be acquired within the retry timeout, `close` fails with `seal-lock-timeout` (exit code 5) and changes nothing.
+
+After taking the lock, `close` reads and validates `paths.json` before any destructive cleanup. An absent `paths.json` is treated as an empty seal store and cleanup continues. If `paths.json` cannot be read or does not conform to the seal store schema, `close` does not start cleanup and leaves the worktree, branch, `paths.json`, and metadata unchanged. Only the seals whose `entry.key` equals the closed key are removed; claims held by other keys are left untouched.
 
 ## `git kura ls`
 
@@ -284,4 +288,4 @@ Kura uses stable exit codes so scripts and AI-agent workflows can react correctl
 | 7 | Seal doctor error |
 | 8 | Guard conflict |
 
-Exit code 5 is signalled by `seal claim` and `seal unclaim`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. Exit code 8 is signalled by `guard acquire` when the worktree is already guarded. The stderr message always starts with a stable reason token (`seal-lock-timeout:`, `seal-conflict:`, `seal-doctor-error:`, or `guard-active:`) that scripts can match without parsing arbitrary text.
+Exit code 5 is signalled by `seal claim`, `seal unclaim`, and `close`. Exit code 6 is signalled by `seal claim`, `seal unclaim`, and `seal test`. Exit code 7 is signalled by `seal doctor` when the seal store fails integrity validation. Exit code 8 is signalled by `guard acquire` when the worktree is already guarded. The stderr message always starts with a stable reason token (`seal-lock-timeout:`, `seal-conflict:`, `seal-doctor-error:`, or `guard-active:`) that scripts can match without parsing arbitrary text.

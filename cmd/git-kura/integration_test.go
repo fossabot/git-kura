@@ -1061,3 +1061,223 @@ func TestSealUnclaimHelpFlag(t *testing.T) {
 		t.Fatalf("help output should describe worktree-derived key resolution: %s", result.stdout)
 	}
 }
+
+// --- close releases seals (issue #43) ---
+
+// requireSealClaimed asserts that "<key>\t<path>" appears in `seal ls`.
+func requireSealClaimed(t *testing.T, cli *testCLI, repo, key, path string) {
+	t.Helper()
+	res := cli.gitKura(repo, "seal", "ls", key)
+	requireExitCode(t, res, 0)
+	requireStdoutContainsLine(t, res, key+"\t"+path)
+}
+
+// requireNoSeals asserts that `seal ls <key>` lists nothing.
+func requireNoSeals(t *testing.T, cli *testCLI, repo, key string) {
+	t.Helper()
+	res := cli.gitKura(repo, "seal", "ls", key)
+	requireExitCode(t, res, 0)
+	if strings.TrimSpace(res.stdout) != "" {
+		t.Fatalf("seal ls %s = %q, want no claims", key, res.stdout)
+	}
+}
+
+func TestCloseReleasesOnlyTargetKeySeals(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	commitFile(t, repo, "file2.txt", "two\n")
+	commitFile(t, repo, "file3.txt", "three\n")
+
+	wt1 := cli.openWorktree(t, repo, "key1")
+	wt2 := cli.openWorktree(t, repo, "key2")
+
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt", "file2.txt"), 0)
+	requireExitCode(t, cli.gitKura(wt2, "seal", "claim", "file3.txt"), 0)
+
+	// key2 cannot claim key1's paths yet.
+	conflict := cli.gitKura(wt2, "seal", "claim", "tracked.txt")
+	requireExitCode(t, conflict, exitSealConflict)
+
+	requireExitCode(t, cli.gitKura(repo, "close", "key1"), 0)
+
+	// key1's claims are gone; key2's claim survives.
+	requireNoSeals(t, cli, repo, "key1")
+	requireSealClaimed(t, cli, repo, "key2", "file3.txt")
+
+	// The paths key1 released can now be claimed by key2.
+	requireExitCode(t, cli.gitKura(wt2, "seal", "claim", "tracked.txt", "file2.txt"), 0)
+}
+
+func TestCloseWithoutSealsSucceeds(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	cli.openWorktree(t, repo, "key1")
+
+	requireExitCode(t, cli.gitKura(repo, "close", "key1"), 0)
+	assertPathMissing(t, expectedWorktreePath(repo, "key1"))
+	assertPathMissing(t, expectedMetadataPath(repo, "key1"))
+}
+
+func TestCloseWorktreeCleanupFailureKeepsSeals(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix git worktree behavior")
+	}
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "key1")
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+
+	// A dirty worktree makes `git worktree remove` fail, so close must abort
+	// before releasing the key's seals.
+	appendFile(t, filepath.Join(wt1, "tracked.txt"), "dirty\n")
+
+	requireNonZeroExitCode(t, cli.gitKura(repo, "close", "key1"))
+	requireSealClaimed(t, cli, repo, "key1", "tracked.txt")
+	assertPathExists(t, expectedWorktreePath(repo, "key1"))
+}
+
+func TestCloseBranchCleanupFailureKeepsSeals(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix git worktree behavior")
+	}
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "key1")
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+
+	// An unmerged commit leaves the worktree clean (so it is removed) but makes
+	// `git branch -d` fail, so close must abort before releasing the seals.
+	writeFile(t, filepath.Join(wt1, "newfile.txt"), "content\n")
+	git(t, wt1, "add", "newfile.txt")
+	git(t, wt1, "commit", "-m", "unmerged commit")
+
+	requireNonZeroExitCode(t, cli.gitKura(repo, "close", "key1"))
+	requireSealClaimed(t, cli, repo, "key1", "tracked.txt")
+}
+
+func TestCloseReleasesSealsWhenWorktreeDirGone(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "key1")
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+
+	// Simulate a manual deletion of the worktree directory: the seal, branch,
+	// and metadata are still present.
+	if err := os.RemoveAll(wt1); err != nil {
+		t.Fatal(err)
+	}
+
+	requireExitCode(t, cli.gitKura(repo, "close", "key1"), 0)
+	requireNoSeals(t, cli, repo, "key1")
+	assertPathMissing(t, expectedMetadataPath(repo, "key1"))
+}
+
+func TestCloseReleasesSealsWhenWorktreeAndBranchGone(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	wt1 := cli.openWorktree(t, repo, "key1")
+	requireExitCode(t, cli.gitKura(wt1, "seal", "claim", "tracked.txt"), 0)
+
+	// Both the worktree directory and the managed branch are gone; only the
+	// seal and metadata remain.
+	if err := os.RemoveAll(wt1); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "worktree", "prune")
+	git(t, repo, "branch", "-D", "key1")
+
+	requireExitCode(t, cli.gitKura(repo, "close", "key1"), 0)
+	requireNoSeals(t, cli, repo, "key1")
+	assertPathMissing(t, expectedMetadataPath(repo, "key1"))
+}
+
+func TestCloseRetriesMetadataOnlyState(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	cli.openWorktree(t, repo, "key1")
+
+	// Remove the worktree and branch the normal way, but leave the git-kura
+	// metadata behind to mimic a previous incomplete close.
+	git(t, repo, "worktree", "remove", expectedWorktreePath(repo, "key1"))
+	git(t, repo, "branch", "-D", "key1")
+	assertPathExists(t, expectedMetadataPath(repo, "key1"))
+
+	requireExitCode(t, cli.gitKura(repo, "close", "key1"), 0)
+	assertPathMissing(t, expectedMetadataPath(repo, "key1"))
+}
+
+func TestCloseLockTimeoutChangesNothing(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	cli.openWorktree(t, repo, "key1")
+
+	// Hold the seal store lock so close cannot acquire it.
+	lockPath := sealLockFilePath(t, repo)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	defer func() { _ = os.Remove(lockPath) }()
+
+	env := filterEnv(append(os.Environ(), "PATH="+cli.envPath), "GIT_KURA_SEAL_LOCK_TIMEOUT")
+	env = append(env, "GIT_KURA_SEAL_LOCK_TIMEOUT=100ms")
+	cmd := exec.Command("git", "kura", "close", "key1")
+	cmd.Dir = repo
+	cmd.Env = env
+	result := runCommand(cmd)
+
+	requireExitCode(t, result, exitSealLockTimeout)
+	requireStderrContains(t, result, "seal-lock-timeout:")
+
+	// Nothing was torn down while the lock was held.
+	assertPathExists(t, expectedWorktreePath(repo, "key1"))
+	assertPathExists(t, expectedMetadataPath(repo, "key1"))
+}
+
+func TestCloseMalformedPathsJSONAborts(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	cli.openWorktree(t, repo, "key1")
+
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(storeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, storeFile, "{not json")
+
+	requireNonZeroExitCode(t, cli.gitKura(repo, "close", "key1"))
+
+	// The worktree, metadata, and the (malformed) store are all untouched.
+	assertPathExists(t, expectedWorktreePath(repo, "key1"))
+	assertPathExists(t, expectedMetadataPath(repo, "key1"))
+	data, err := os.ReadFile(storeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{not json" {
+		t.Fatalf("paths.json = %q, want it left unchanged", string(data))
+	}
+}
+
+func TestCloseAbsentPathsJSONContinues(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	cli.openWorktree(t, repo, "key1")
+
+	storeFile, _, err := pathsSealStore(repo)
+	if err != nil {
+		t.Fatalf("pathsSealStore: %v", err)
+	}
+	assertPathMissing(t, storeFile)
+
+	requireExitCode(t, cli.gitKura(repo, "close", "key1"), 0)
+	assertPathMissing(t, expectedWorktreePath(repo, "key1"))
+	assertPathMissing(t, expectedMetadataPath(repo, "key1"))
+}
