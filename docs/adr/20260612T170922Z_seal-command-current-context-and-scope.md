@@ -1,8 +1,8 @@
 # Seal Command Current Context and Scope
 
-- Status: Partially superseded
+- Status: Partially superseded by [20260614T002323Z_supersede-legacy-seal-command-model.md](20260614T002323Z_supersede-legacy-seal-command-model.md)
 - Created: 2026-06-12T17:09:22Z
-- Amended: 2026-06-13
+- Amended: 2026-06-13, 2026-06-14
 
 > **Partially superseded.** The read-only-vs-mutation classification this ADR
 > establishes still holds, and it now governs the implemented commands: `seal ls`
@@ -22,7 +22,8 @@
 > `GIT_KURA_SEAL_KEY` being set, unset, or invalid, read it as "the worktree-derived
 > current key" instead. Treat the `seal enter` / `seal session ...` references and
 > the `seal add` / `seal remove` names below as historical context, not current
-> design.
+> design. The supersession is recorded authoritatively in
+> [20260614T002323Z_supersede-legacy-seal-command-model.md](20260614T002323Z_supersede-legacy-seal-command-model.md).
 
 ## Context
 

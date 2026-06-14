@@ -19,6 +19,11 @@
 | `superseded` | 後続 ADR により完全に置き換えられた |
 | `partially superseded` | 決定の一部のみ現行。現行として参照してよい範囲を各項目に明記する |
 
+`partially superseded` の各項目について、どの clause が現行でどの clause が
+置き換えられたかは
+[docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md](../../docs/adr/20260614T002323Z_supersede-legacy-seal-command-model.md)
+が authoritative source である。下記の各項目はその範囲を実装に対応づけて要約する。
+
 ---
 
 ## seal store の管理方法と writer lock

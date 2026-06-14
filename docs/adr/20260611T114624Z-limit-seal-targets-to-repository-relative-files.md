@@ -1,7 +1,13 @@
 # Limit seal targets to repository-relative files
 
-- Status: Accepted
+- Status: Partially superseded by [20260614T002323Z_supersede-legacy-seal-command-model.md](20260614T002323Z_supersede-legacy-seal-command-model.md)
 - Created: 2026-06-11T11:46:24Z
+
+> **Partially superseded.** The repository-relative path constraints and
+> normalization rules below are still current. The `git kura seal add` /
+> `seal remove` command names are superseded by `seal claim` / `seal unclaim`
+> (the existence-check wording applies to `claim` / `unclaim` respectively). See
+> [20260614T002323Z_supersede-legacy-seal-command-model.md](20260614T002323Z_supersede-legacy-seal-command-model.md).
 
 ## Context
 
