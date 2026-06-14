@@ -816,7 +816,8 @@ func TestExitCodeValuesMatchDocs(t *testing.T) {
 	// Keep in sync with the exit code table in docs/commands.md.
 	if exitSuccess != 0 || exitGeneralError != 1 || exitUsageError != 2 ||
 		exitUnsafeRefused != 3 || exitNotFound != 4 ||
-		exitSealLockTimeout != 5 || exitSealConflict != 6 {
+		exitSealLockTimeout != 5 || exitSealConflict != 6 ||
+		exitSealDoctorError != 7 || exitGuardConflict != 8 {
 		t.Fatal("exit code constants must match the table in docs/commands.md")
 	}
 }

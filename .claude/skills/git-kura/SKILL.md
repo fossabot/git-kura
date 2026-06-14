@@ -39,33 +39,43 @@ task key を source of truth として、すべての worktree 操作を `git ku
 2. worktree に移動する
    cd "$(git kura get <key>)"
 
-3. 変更予定のファイルを claim する
+3. 作業開始前に worktree guard を取得する
+   git kura guard acquire
+   # 同じ worktree を別 agent が同時に使うのを防ぐ。guard key は worktree の
+   # current key で、引数では渡さない。
+   # exit code 8（"guard-active:"）で失敗したら、別 agent が使用中。
+   # 回避せず、報告して作業を止める。
+
+4. 変更予定のファイルを claim する
    - まず変更予定のファイルを一覧にする
    - その全ファイルを claim する
      git kura seal claim <files...>
    # claim は path が repo root 相対・存在するファイルであることを要求する。
    # 新規作成予定のファイルは先に作成（例: touch）してから claim する。
 
-4. seal が競合したら作業を中断する
+5. seal が競合したら作業を中断する
    - claim が exit code 6（"seal-conflict:"）で失敗したら、
      競合したファイルと、それを claim している key を報告して作業を止める。
    - 自分で competing key を unclaim したり、強制的に編集を進めたりしない。
 
-5. seal が競合しなかったら、実際に変更を行う
+6. seal が競合しなかったら、実際に変更を行う
    - claim 済みのファイルだけを編集する。
    - 編集対象が増えたら、その都度 git kura seal claim で追加 claim する。
 
-6. review を受けて、指示が出たら PR を作成する
+7. review を受けて、指示が出たら PR を作成する
    # review より前、または PR 作成指示が出るより前に push / PR を作らない。
 
-7. マージ指示を受けたら、claim していたファイルを全て解放する
+8. マージ指示を受けたら、claim していたファイルを全て解放する
    git kura seal unclaim <files...>
    # claim した全ファイルを unclaim する。claim 状況は git kura seal ls <key> で確認できる。
 
-8. worktree を片付ける
-   cd "$(git kura get <key> --root)"   # repo root に戻る
-   git kura close <key>                 # worktree と branch を削除（safety check 後）
-   git pull                             # main を更新
+9. worktree の作業を終えたら guard を解放する
+   git kura guard release
+
+10. worktree を片付ける
+    cd "$(git kura get <key> --root)"   # repo root に戻る
+    git kura close <key>                 # worktree と branch を削除（safety check 後）
+    git pull                             # main を更新
 ```
 
 ---
@@ -86,10 +96,18 @@ task key を source of truth として、すべての worktree 操作を `git ku
 3. worktree を解決して移動
    cd "$(git kura get <key>)"
 
-4. レビュー開始
+4. worktree guard を取得する
+   git kura guard acquire
+   # review も working tree / index を共有するため、実装と同様に guard を取る。
+   # exit code 8（"guard-active:"）なら別 agent が使用中。回避せず報告して止める。
+
+5. レビュー開始
    - diff / log / test 結果を確認する
    - AI prompt 向けコンテキストが必要なら: git kura get <key> --toon
    - script 向け metadata が必要なら:     git kura get <key> --json
+
+6. レビューを終えたら guard を解放する
+   git kura guard release
 ```
 
 ---
@@ -127,10 +145,13 @@ git status --short
 | claim を解放 | `git kura seal unclaim <files...>` |
 | 競合を事前確認（read-only） | `git kura seal test <files...>` |
 | claim 状況を確認 | `git kura seal ls [key]` |
+| worktree guard を取得 | `git kura guard acquire` |
+| worktree guard を解放 | `git kura guard release` |
+| guard 状態を確認 | `git kura guard status` |
 | worktree を閉じる | `git kura close <key>` ※safety check 後 |
 | dry-run で確認 | `git kura open <key> --dry-run` |
 
-exit code: 0=成功 / 1=一般エラー / 2=使い方エラー / 3=unsafe拒否 / 4=not found / 5=seal lock timeout / 6=seal-conflict
+exit code: 0=成功 / 1=一般エラー / 2=使い方エラー / 3=unsafe拒否 / 4=not found / 5=seal lock timeout / 6=seal-conflict / 7=seal-doctor-error / 8=guard-active
 
 ---
 
