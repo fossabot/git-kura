@@ -10,8 +10,175 @@
 # Prerequisites: `git kura` must resolve on PATH. In CI this is arranged by
 # running `make build` and prepending `./bin` to PATH. For local runs use
 # `make walkthrough`, which does the same and then invokes this script.
+#
+# Read top-down: `main` describes the walkthrough; the helpers it relies on are
+# defined below it and `main` is invoked at the end of the file.
 
 set -eu
+
+# main runs the whole walkthrough. It relies on the helpers defined further
+# down (step/pass/fail, the gk runner, the expect_* assertions, seal_present)
+# and is invoked at the end of the file, after everything it needs exists.
+main() {
+	#-- 1. PATH availability --------------------------------------------
+
+	step "git kura --version"
+	gk "." --version
+	expect_rc 0 "git-kura on PATH responds to --version"
+
+	#-- 2. throwaway repository -----------------------------------------
+
+	WORK="$(mktemp -d)"
+	REPO="$WORK/repo"
+	mkdir -p "$REPO"
+	cd "$REPO"
+	git init -q
+	git config user.email walkthrough@example.com
+	git config user.name "git-kura walkthrough"
+	for f in file1.txt file2.txt file3.txt file4.txt file5.txt; do
+		printf 'content of %s\n' "$f" >"$REPO/$f"
+	done
+	git add .
+	git commit -qm "initial commit"
+
+	#-- 3. create multiple worktrees ------------------------------------
+
+	step "create multiple worktrees"
+	gk "$REPO" open alpha
+	expect_rc 0 "open worktree alpha"
+	gk "$REPO" open beta
+	expect_rc 0 "open worktree beta"
+	ALPHA="$(cd "$REPO" && git kura get alpha)"
+	BETA="$(cd "$REPO" && git kura get beta)"
+
+	#-- 4. guard acquire / release --------------------------------------
+
+	step "guard acquire is exclusive per worktree"
+	gk "$ALPHA" guard acquire
+	expect_rc 0 "alpha acquires its guard"
+	gk "$BETA" guard acquire
+	expect_rc 0 "beta acquires its own guard independently"
+
+	gk "$ALPHA" guard acquire
+	expect_rc 8 "re-acquiring alpha's guard conflicts"
+	expect_stderr_contains "guard-active" "guard conflict carries the guard-active token"
+
+	gk "$ALPHA" guard release
+	expect_rc 0 "alpha releases its guard"
+	gk "$ALPHA" guard acquire
+	expect_rc 0 "alpha can re-acquire its guard after release"
+
+	gk "$ALPHA" guard release
+	expect_rc 0 "alpha releases its guard again"
+	gk "$BETA" guard release
+	expect_rc 0 "beta releases its guard"
+
+	#-- 5. seal claim ---------------------------------------------------
+
+	step "seal claim succeeds without conflict"
+	gk "$ALPHA" seal claim file1.txt file2.txt
+	expect_rc 0 "alpha claims file1.txt and file2.txt"
+
+	step "seal claim conflicts across worktrees"
+	gk "$BETA" seal claim file1.txt
+	expect_rc 6 "beta cannot claim file1.txt already claimed by alpha"
+	expect_stderr_contains "seal-conflict" "conflict carries the seal-conflict reason token"
+	expect_stderr_contains "already claimed" "conflict message reports the file is already claimed"
+
+	gk "$BETA" seal claim file3.txt
+	expect_rc 0 "beta claims the unclaimed file3.txt"
+
+	#-- 6. seal ls ------------------------------------------------------
+
+	step "seal ls reflects current claims"
+	seal_present alpha file1.txt "seal ls lists alpha file1.txt"
+	seal_present alpha file2.txt "seal ls lists alpha file2.txt"
+	seal_present beta file3.txt "seal ls lists beta file3.txt"
+
+	#-- 7. seal test ----------------------------------------------------
+
+	step "seal test detects conflicts and clean paths"
+	gk "$BETA" seal test file1.txt
+	expect_rc 6 "seal test reports a conflict for file1.txt"
+	expect_stderr_contains "seal-conflict" "seal test conflict carries the reason token"
+
+	gk "$BETA" seal test file3.txt
+	expect_rc 0 "seal test passes for a file beta already claims"
+
+	gk "$BETA" seal test file4.txt
+	expect_rc 0 "seal test passes for an unclaimed file"
+
+	#-- 8. seal unclaim -------------------------------------------------
+
+	step "seal unclaim frees a path for another worktree"
+	gk "$ALPHA" seal unclaim file1.txt
+	expect_rc 0 "alpha unclaims file1.txt"
+
+	gk "$BETA" seal claim file1.txt
+	expect_rc 0 "beta can claim file1.txt once alpha unclaimed it"
+
+	gk "$BETA" seal claim file2.txt
+	expect_rc 6 "beta still cannot claim file2.txt, which alpha did not unclaim"
+	expect_stderr_contains "seal-conflict" "still-claimed file2.txt reports the conflict token"
+
+	#-- 9. seal doctor --------------------------------------------------
+
+	step "seal doctor validates a healthy store"
+	gk "$REPO" seal doctor
+	expect_rc 0 "seal doctor succeeds on a healthy store"
+
+	step "seal doctor rejects a corrupted store"
+	STORE="$REPO/.git/kura/seals/paths.json"
+	cp "$STORE" "$STORE.bak"
+	printf 'this is not valid json\n' >"$STORE"
+	gk "$REPO" seal doctor
+	expect_nonzero "seal doctor fails on a corrupted store"
+	expect_stderr_contains "seal-doctor-error" "doctor reports the seal-doctor-error token"
+	mv "$STORE.bak" "$STORE"
+
+	#-- 10. close (happy path only) -------------------------------------
+
+	step "close: open and claim a throwaway worktree"
+	gk "$REPO" open gamma
+	expect_rc 0 "open worktree gamma"
+	GAMMA="$(cd "$REPO" && git kura get gamma)"
+	gk "$GAMMA" seal claim file5.txt
+	expect_rc 0 "gamma claims file5.txt"
+
+	GAMMA_META="$REPO/.git/kura/meta/worktrees/gamma.json"
+	if [ ! -d "$GAMMA" ]; then
+		fail "precondition: gamma worktree directory should exist before close"
+	fi
+	if [ ! -f "$GAMMA_META" ]; then
+		fail "precondition: gamma metadata should exist before close"
+	fi
+
+	step "close removes the worktree directory and metadata"
+	gk "$REPO" close gamma
+	expect_rc 0 "close gamma"
+	if [ -d "$GAMMA" ]; then
+		fail "gamma worktree directory still exists after close"
+	fi
+	pass "gamma worktree directory removed"
+	if [ -f "$GAMMA_META" ]; then
+		fail "gamma metadata still exists after close"
+	fi
+	pass "gamma metadata removed"
+
+	step "close releases the closed worktree's seals"
+	gk "$REPO" seal ls
+	expect_rc 0 "seal ls runs after close"
+	if grep -E "^gamma[[:space:]]+file5.txt\$" "$GK_OUT_FILE" >/dev/null; then
+		dump_last
+		fail "gamma seal on file5.txt is still present after close"
+	fi
+	pass "gamma seal on file5.txt released after close"
+
+	#-- done ------------------------------------------------------------
+
+	step "walkthrough complete"
+	printf '\nAll walkthrough scenarios passed.\n'
+}
 
 #-- output helpers ----------------------------------------------------------
 
@@ -110,161 +277,4 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-#-- 1. PATH availability ----------------------------------------------------
-
-step "git kura --version"
-gk "." --version
-expect_rc 0 "git-kura on PATH responds to --version"
-
-#-- 2. throwaway repository -------------------------------------------------
-
-WORK="$(mktemp -d)"
-REPO="$WORK/repo"
-mkdir -p "$REPO"
-cd "$REPO"
-git init -q
-git config user.email walkthrough@example.com
-git config user.name "git-kura walkthrough"
-for f in file1.txt file2.txt file3.txt file4.txt file5.txt; do
-	printf 'content of %s\n' "$f" >"$REPO/$f"
-done
-git add .
-git commit -qm "initial commit"
-
-#-- 3. create multiple worktrees -------------------------------------------
-
-step "create multiple worktrees"
-gk "$REPO" open alpha
-expect_rc 0 "open worktree alpha"
-gk "$REPO" open beta
-expect_rc 0 "open worktree beta"
-ALPHA="$(cd "$REPO" && git kura get alpha)"
-BETA="$(cd "$REPO" && git kura get beta)"
-
-#-- 4. guard acquire / release ---------------------------------------------
-
-step "guard acquire is exclusive per worktree"
-gk "$ALPHA" guard acquire
-expect_rc 0 "alpha acquires its guard"
-gk "$BETA" guard acquire
-expect_rc 0 "beta acquires its own guard independently"
-
-gk "$ALPHA" guard acquire
-expect_rc 8 "re-acquiring alpha's guard conflicts"
-expect_stderr_contains "guard-active" "guard conflict carries the guard-active token"
-
-gk "$ALPHA" guard release
-expect_rc 0 "alpha releases its guard"
-gk "$ALPHA" guard acquire
-expect_rc 0 "alpha can re-acquire its guard after release"
-
-gk "$ALPHA" guard release
-expect_rc 0 "alpha releases its guard again"
-gk "$BETA" guard release
-expect_rc 0 "beta releases its guard"
-
-#-- 5. seal claim -----------------------------------------------------------
-
-step "seal claim succeeds without conflict"
-gk "$ALPHA" seal claim file1.txt file2.txt
-expect_rc 0 "alpha claims file1.txt and file2.txt"
-
-step "seal claim conflicts across worktrees"
-gk "$BETA" seal claim file1.txt
-expect_rc 6 "beta cannot claim file1.txt already claimed by alpha"
-expect_stderr_contains "seal-conflict" "conflict carries the seal-conflict reason token"
-expect_stderr_contains "already claimed" "conflict message reports the file is already claimed"
-
-gk "$BETA" seal claim file3.txt
-expect_rc 0 "beta claims the unclaimed file3.txt"
-
-#-- 6. seal ls --------------------------------------------------------------
-
-step "seal ls reflects current claims"
-seal_present alpha file1.txt "seal ls lists alpha file1.txt"
-seal_present alpha file2.txt "seal ls lists alpha file2.txt"
-seal_present beta file3.txt "seal ls lists beta file3.txt"
-
-#-- 7. seal test ------------------------------------------------------------
-
-step "seal test detects conflicts and clean paths"
-gk "$BETA" seal test file1.txt
-expect_rc 6 "seal test reports a conflict for file1.txt"
-expect_stderr_contains "seal-conflict" "seal test conflict carries the reason token"
-
-gk "$BETA" seal test file3.txt
-expect_rc 0 "seal test passes for a file beta already claims"
-
-gk "$BETA" seal test file4.txt
-expect_rc 0 "seal test passes for an unclaimed file"
-
-#-- 8. seal unclaim ---------------------------------------------------------
-
-step "seal unclaim frees a path for another worktree"
-gk "$ALPHA" seal unclaim file1.txt
-expect_rc 0 "alpha unclaims file1.txt"
-
-gk "$BETA" seal claim file1.txt
-expect_rc 0 "beta can claim file1.txt once alpha unclaimed it"
-
-gk "$BETA" seal claim file2.txt
-expect_rc 6 "beta still cannot claim file2.txt, which alpha did not unclaim"
-expect_stderr_contains "seal-conflict" "still-claimed file2.txt reports the conflict token"
-
-#-- 9. seal doctor ----------------------------------------------------------
-
-step "seal doctor validates a healthy store"
-gk "$REPO" seal doctor
-expect_rc 0 "seal doctor succeeds on a healthy store"
-
-step "seal doctor rejects a corrupted store"
-STORE="$REPO/.git/kura/seals/paths.json"
-cp "$STORE" "$STORE.bak"
-printf 'this is not valid json\n' >"$STORE"
-gk "$REPO" seal doctor
-expect_nonzero "seal doctor fails on a corrupted store"
-expect_stderr_contains "seal-doctor-error" "doctor reports the seal-doctor-error token"
-mv "$STORE.bak" "$STORE"
-
-#-- 10. close (happy path only) --------------------------------------------
-
-step "close: open and claim a throwaway worktree"
-gk "$REPO" open gamma
-expect_rc 0 "open worktree gamma"
-GAMMA="$(cd "$REPO" && git kura get gamma)"
-gk "$GAMMA" seal claim file5.txt
-expect_rc 0 "gamma claims file5.txt"
-
-GAMMA_META="$REPO/.git/kura/meta/worktrees/gamma.json"
-if [ ! -d "$GAMMA" ]; then
-	fail "precondition: gamma worktree directory should exist before close"
-fi
-if [ ! -f "$GAMMA_META" ]; then
-	fail "precondition: gamma metadata should exist before close"
-fi
-
-step "close removes the worktree directory and metadata"
-gk "$REPO" close gamma
-expect_rc 0 "close gamma"
-if [ -d "$GAMMA" ]; then
-	fail "gamma worktree directory still exists after close"
-fi
-pass "gamma worktree directory removed"
-if [ -f "$GAMMA_META" ]; then
-	fail "gamma metadata still exists after close"
-fi
-pass "gamma metadata removed"
-
-step "close releases the closed worktree's seals"
-gk "$REPO" seal ls
-expect_rc 0 "seal ls runs after close"
-if grep -E "^gamma[[:space:]]+file5.txt\$" "$GK_OUT_FILE" >/dev/null; then
-	dump_last
-	fail "gamma seal on file5.txt is still present after close"
-fi
-pass "gamma seal on file5.txt released after close"
-
-#-- done --------------------------------------------------------------------
-
-step "walkthrough complete"
-printf '\nAll walkthrough scenarios passed.\n'
+main "$@"
