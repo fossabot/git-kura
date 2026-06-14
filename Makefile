@@ -41,5 +41,9 @@ tidy:
 build:
 	go build -o ./bin/git-kura ./cmd/git-kura
 
+.PHONY: walkthrough
+walkthrough: build
+	PATH="$(CURDIR)/bin:$$PATH" sh scripts/walkthrough.sh
+
 .PHONY: check
 check: fmt-check vet coverage vuln
