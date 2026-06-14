@@ -79,19 +79,15 @@ Flags:
 
 const closeHelp = `Usage: git kura close <key>
 
-Remove the git worktree and Kura-managed branch for <key>, and release every
-path seal that <key> holds in the repository-wide seal store.
+Remove the worktree and Kura-managed branch for <key>, and release the path
+seals that <key> holds in the repository-wide seal store.
 
-close takes the seal store lock (paths.lock) before any cleanup so that seal
-release is atomic with worktree, branch, and metadata removal. If the lock
-cannot be acquired within the retry timeout, close fails with seal-lock-timeout
-(exit code 5) and changes nothing.
+close takes the seal store lock before any cleanup, so it can fail with
+seal-lock-timeout (exit code 5) when the lock is held, leaving everything
+unchanged.
 
-After taking the lock, close reads and validates paths.json before any
-destructive cleanup. An absent paths.json is treated as an empty seal store and
-cleanup continues. If paths.json cannot be read or does not conform to the seal
-store schema, close does not start cleanup and leaves the worktree, branch,
-paths.json, and metadata unchanged.`
+See docs/commands.md for the full cleanup order, paths.json handling, and
+recovery behavior.`
 
 const lsHelp = `Usage: git kura ls
 
