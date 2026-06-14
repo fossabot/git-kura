@@ -8,9 +8,7 @@ The quickest way to install `git-kura` on Linux or macOS:
 curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh
 ```
 
-The installer detects your OS and CPU architecture, downloads the matching release
-archive from GitHub, verifies the SHA-256 checksum, and installs the binary as
-`git-kura` into `~/.local/bin`.
+The installer detects your OS and CPU architecture, downloads the matching release archive from GitHub, verifies the SHA-256 checksum, and installs the binary as `git-kura` into `~/.local/bin`.
 
 ### Options
 
@@ -26,8 +24,7 @@ Install to a custom directory:
 curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh -s -- --install-dir "$HOME/bin"
 ```
 
-Require cosign signature verification (fails if `cosign` is not installed or the
-signature bundle is unavailable):
+Require cosign signature verification (fails if `cosign` is not installed or the signature bundle is unavailable):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | sh -s -- --require-signature
@@ -35,15 +32,13 @@ curl -fsSL https://raw.githubusercontent.com/tooppoo/git-kura/main/install.sh | 
 
 ### PATH
 
-The installer prints a reminder if `~/.local/bin` is not on your `PATH`. Add it
-to your shell profile if needed:
+The installer prints a reminder if `~/.local/bin` is not on your `PATH`. Add it to your shell profile if needed:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Git recognises `git-kura` as the external subcommand `git kura` automatically
-once the binary is on `PATH`.
+Git recognises `git-kura` as the external subcommand `git kura` automatically once the binary is on `PATH`.
 
 ### Supported platforms
 
@@ -56,13 +51,9 @@ once the binary is on `PATH`.
 
 ### Verification
 
-The installer always verifies the SHA-256 checksum of the downloaded archive
-against `checksums.txt` from the same release. A mismatch causes the installer
-to abort before touching `~/.local/bin`.
+The installer always verifies the SHA-256 checksum of the downloaded archive against `checksums.txt` from the same release. A mismatch causes the installer to abort before touching `~/.local/bin`.
 
-If `cosign` is on your `PATH`, the installer additionally verifies the
-`checksums.txt` signature bundle (`checksums.txt.sigstore.json`) published with
-each release. You can make this check mandatory with `--require-signature`.
+If `cosign` is on your `PATH`, the installer additionally verifies the `checksums.txt` signature bundle (`checksums.txt.sigstore.json`) published with each release. You can make this check mandatory with `--require-signature`.
 
 ---
 
@@ -117,8 +108,7 @@ each release. You can make this check mandatory with `--require-signature`.
 
 ### Optional: cosign signature verification
 
-Each release publishes `checksums.txt.sigstore.json`. If you have
-[cosign](https://docs.sigstore.dev/cosign/system_config/installation/) installed:
+Each release publishes `checksums.txt.sigstore.json`. If you have [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) installed:
 
 ```sh
 curl -fLO "https://github.com/tooppoo/git-kura/releases/download/${VERSION}/checksums.txt.sigstore.json"
@@ -193,8 +183,7 @@ cp ./bin/git-kura ~/.local/bin/git-kura
 go install github.com/tooppoo/git-kura/cmd/git-kura@latest
 ```
 
-This places the binary in `$(go env GOPATH)/bin`. Make sure that directory is on
-`PATH`.
+This places the binary in `$(go env GOPATH)/bin`. Make sure that directory is on `PATH`.
 
 ---
 

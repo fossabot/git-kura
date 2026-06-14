@@ -2,16 +2,13 @@
 
 Kura is a keyed worktree resolver for Git.
 
-Its core responsibility is intentionally narrow: given a stable key such as an
-issue, ticket, or task number, Kura creates, resolves, and removes a
-deterministic Git worktree.
+Its core responsibility is intentionally narrow: given a stable key such as an issue, ticket, or task number, Kura creates, resolves, and removes a deterministic Git worktree.
 
 ## Design principles
 
 ### 1. The key is the source of truth
 
-Kura should not require users or agents to remember worktree paths manually. The
-task key should be enough.
+Kura should not require users or agents to remember worktree paths manually. The task key should be enough.
 
 ```sh
 git kura get 51 --path
@@ -19,8 +16,7 @@ git kura get 51 --path
 
 ### 2. Output should be script-friendly
 
-Commands that return values should be usable in shell scripts without extra
-formatting.
+Commands that return values should be usable in shell scripts without extra formatting.
 
 ```sh
 cd "$(git kura get 51 --path)"
@@ -40,11 +36,9 @@ git kura get 51 --toon
 
 ### 3. Kura should stay small
 
-Kura should not become an AI session manager, TUI Git client, pull request
-orchestrator, or issue tracker client.
+Kura should not become an AI session manager, TUI Git client, pull request orchestrator, or issue tracker client.
 
-Those tools may integrate with Kura, but Kura itself should remain focused on
-keyed worktree lifecycle management.
+Those tools may integrate with Kura, but Kura itself should remain focused on keyed worktree lifecycle management.
 
 ### 4. Safety over convenience
 
@@ -79,8 +73,7 @@ See [state-management.md](state-management.md) for how Kura stores local worktre
 
 Kura supports macOS, Linux, and Windows.
 
-Path handling uses platform-aware APIs. Git branch names and filesystem paths
-are treated as distinct:
+Path handling uses platform-aware APIs. Git branch names and filesystem paths are treated as distinct:
 
 ```txt
 branch: issue/51

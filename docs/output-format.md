@@ -39,8 +39,7 @@ Example output:
 }
 ```
 
-`git kura open <key> --dry-run` uses the same JSON schema. In dry-run output,
-`baseBranch` is the current branch, `exists` is `false`, and `dirty` is `false`.
+`git kura open <key> --dry-run` uses the same JSON schema. In dry-run output, `baseBranch` is the current branch, `exists` is `false`, and `dirty` is `false`.
 
 ### TOON (`--toon` / `--format toon`)
 
@@ -69,5 +68,4 @@ Use TOON when passing workspace context to an LLM prompt or coding agent. JSON r
 
 ## Metadata schema
 
-The JSON Schema is defined in [`cmd/git-kura/schema/output.schema.json`](../cmd/git-kura/schema/output.schema.json)
-and is embedded in the binary for runtime output validation.
+The JSON Schema is defined in [`cmd/git-kura/schema/output.schema.json`](../cmd/git-kura/schema/output.schema.json) and is embedded in the binary for runtime output validation.
