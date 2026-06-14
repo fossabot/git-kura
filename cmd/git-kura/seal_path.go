@@ -120,29 +120,41 @@ func doctorSealStore(storePath string) error {
 	}
 	sort.Strings(rawPaths)
 
+	// Validate three integrity properties of every stored entry: each path is
+	// a well-formed, repository-relative location that stays inside the repo;
+	// no two entries collapse to the same canonical path; and every path is
+	// already stored in its canonical (normalized) form. Every violation found
+	// in a single pass is collected and reported together, so the caller sees
+	// all problems at once rather than fixing and re-running one at a time.
+	var violations []error
 	seen := make(map[string]string, len(rawPaths))
 	for _, rawPath := range rawPaths {
 		entry := store.Paths[rawPath]
 
 		canonical, err := canonicalStoredSealPath(rawPath)
 		if err != nil {
-			return err
+			// Without a canonical form the duplication and normalization checks
+			// below are meaningless for this entry, so record it and move on.
+			violations = append(violations, err)
+			continue
 		}
 		if firstRawPath, ok := seen[canonical]; ok {
 			firstKey := store.Paths[firstRawPath].Key
 			if firstKey != entry.Key {
-				return fmt.Errorf("store entries %q (key %q) and %q (key %q) refer to the same canonical path %q",
-					firstRawPath, firstKey, rawPath, entry.Key, canonical)
+				violations = append(violations, fmt.Errorf("store entries %q (key %q) and %q (key %q) refer to the same canonical path %q",
+					firstRawPath, firstKey, rawPath, entry.Key, canonical))
+			} else {
+				violations = append(violations, fmt.Errorf("store entries %q and %q duplicate canonical path %q", firstRawPath, rawPath, canonical))
 			}
-			return fmt.Errorf("store entries %q and %q duplicate canonical path %q", firstRawPath, rawPath, canonical)
+			continue
 		}
 		seen[canonical] = rawPath
 		if canonical != rawPath {
-			return fmt.Errorf("store entry %q is not normalized; canonical path is %q", rawPath, canonical)
+			violations = append(violations, fmt.Errorf("store entry %q is not normalized; canonical path is %q", rawPath, canonical))
 		}
 	}
 
-	return nil
+	return errors.Join(violations...)
 }
 
 func canonicalStoredSealPath(rawPath string) (string, error) {

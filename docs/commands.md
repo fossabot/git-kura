@@ -215,7 +215,7 @@ An absent `paths.json` is treated as an empty store and succeeds. A healthy stor
 
 `doctor` validates the store file structure, `schemaVersion`, entry keys, repository-relative path syntax, `/` path separators, paths that escape the repository root, and paths that would duplicate another entry after normalization. It does not check whether stored paths currently exist in the working tree, whether they are files or directories, or where symlinks point.
 
-If the store is malformed or inconsistent, `doctor` exits with `seal-doctor-error` (code 7) and reports the problematic store entry on stderr. `doctor` is read-only: it does not modify `paths.json`, does not take `paths.lock`, and does not create, remove, or rewrite a lock file.
+If the store is malformed or inconsistent, `doctor` exits with `seal-doctor-error` (code 7) and reports every problematic store entry it finds on stderr, so all issues can be fixed in a single pass. `doctor` is read-only: it does not modify `paths.json`, does not take `paths.lock`, and does not create, remove, or rewrite a lock file.
 
 In v0 `seal doctor` takes no arguments and no options. `git kura seal doctor <key>`, `git kura seal doctor --fix`, and other options are usage errors.
 

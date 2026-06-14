@@ -585,6 +585,30 @@ func TestDoctorSealStoreRejectsInvalidStoredPaths(t *testing.T) {
 	}
 }
 
+// TestDoctorSealStoreReportsEveryViolation verifies that doctor does not stop at
+// the first bad entry: a store with several independent problems must surface
+// all of them so the user can fix them in one pass.
+func TestDoctorSealStoreReportsEveryViolation(t *testing.T) {
+	cli := newTestCLI(t)
+	repo := cli.initRepo(t)
+	storeFile := seedSealStore(t, repo, map[string]sealEntry{
+		`bad\sep.go`:    {Key: "key1"}, // backslash separator
+		"../escape.txt": {Key: "key1"}, // escapes the repository root
+		"src/./b.go":    {Key: "key1"}, // not normalized
+	})
+
+	err := doctorSealStore(storeFile)
+	if err == nil {
+		t.Fatal("doctor error = nil, want error")
+	}
+	// Each substring uniquely identifies one of the seeded bad entries.
+	for _, want := range []string{"sep.go", "escape.txt", "src/./b.go"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("doctor error %q should mention every violation, missing %q", err.Error(), want)
+		}
+	}
+}
+
 func TestCanonicalStoredSealPath(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

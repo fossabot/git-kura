@@ -125,7 +125,8 @@ on the current worktree or current seal key.
 
 An absent store is treated as an empty store. If the store is malformed or
 contains invalid paths, seal doctor exits with seal-doctor-error (code 7) and
-reports the problematic store entry. On success it prints nothing and exits 0.
+reports every problematic store entry it finds. On success it prints nothing
+and exits 0.
 
 This command takes no arguments and no options in v0.`
 
