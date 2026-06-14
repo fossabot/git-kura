@@ -134,5 +134,6 @@
   - [seal.go](seal.go) — `runSealTest` / `parseSealLsArgs` / `cmdSealLs`
   - [seal_path.go](seal_path.go) — `cmdSealTest`
 - **test**:
-  - [unit_test.go](unit_test.go) — `TestCmdSealTest*` / `TestRunSealTest*` / `TestCmdSealLs*`
+  - [unit_test.go](unit_test.go) — `TestCmdSealTest*` / `TestRunSealTest*`
+  - [command_test.go](command_test.go) — `TestCmdSealLs*`
   - [integration_test.go](integration_test.go) — `TestSealTest*` / `TestSealLs*`
