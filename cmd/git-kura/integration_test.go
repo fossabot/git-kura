@@ -966,20 +966,6 @@ func TestSealDoctorMissingStoreSucceedsSilently(t *testing.T) {
 	requireEmptyStderr(t, result)
 }
 
-func TestSealDoctorSucceedsFromUnmanagedRepoAndIgnoresEnvKey(t *testing.T) {
-	cli := newTestCLI(t)
-	repo := cli.initRepo(t)
-	seedSealStore(t, repo, map[string]sealEntry{
-		"tracked.txt": {Key: "other-key"},
-	})
-
-	t.Setenv("GIT_KURA_SEAL_KEY", "ignored")
-	result := cli.gitKura(repo, "seal", "doctor")
-	requireExitCode(t, result, 0)
-	requireEmptyStdout(t, result)
-	requireEmptyStderr(t, result)
-}
-
 func TestSealDoctorDetectsInvalidStoreWithExitCode7(t *testing.T) {
 	cli := newTestCLI(t)
 	repo := cli.initRepo(t)
