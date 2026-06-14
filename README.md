@@ -3,6 +3,7 @@
 [![CI](https://github.com/tooppoo/git-kura/actions/workflows/ci.yml/badge.svg)](https://github.com/tooppoo/git-kura/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/tooppoo/git-kura/graph/badge.svg?token=5f8XJ77qiN)](https://codecov.io/gh/tooppoo/git-kura)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Ftooppoo%2Fgit-kura.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Ftooppoo%2Fgit-kura?ref=badge_shield)
 
 `git-kura` is a keyed worktree resolver for Git.
 
@@ -93,3 +94,6 @@ See [docs/installation.md](docs/installation.md) for options such as `--version`
 ## License
 
 Apache License 2.0
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Ftooppoo%2Fgit-kura.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Ftooppoo%2Fgit-kura?ref=badge_large)
